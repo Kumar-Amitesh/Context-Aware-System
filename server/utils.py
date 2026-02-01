@@ -12,6 +12,8 @@ from chromadb import PersistentClient
 from llm import call_gemini
 from models import *
 import hashlib
+from logger import get_logger
+logger = get_logger("utils")
 
 
 SECRET_KEY = os.getenv("JWT_SECRET", "exam-secret")
@@ -20,7 +22,7 @@ _embedding_model = None
 _chroma_client = None
 
 
-# ---------------- BASIC ----------------
+# BASIC
 
 def generate_id():
     return str(uuid.uuid4())
@@ -34,7 +36,7 @@ def verify_password(h, p):
     return check_password_hash(h, p)
 
 
-# ---------------- JWT ----------------
+# JWT
 
 def generate_token(uid):
     payload = {
@@ -52,7 +54,7 @@ def verify_token(token):
         return None
 
 
-# ---------------- PDF ----------------
+# PDF
 
 def extract_text_from_pdf(path):
     reader = PdfReader(path)
@@ -66,7 +68,7 @@ def extract_text_from_pdf(path):
     return text
 
 
-# ---------------- EMBEDDINGS ----------------
+# EMBEDDINGS 
 
 def get_embedding_model():
     global _embedding_model
@@ -76,16 +78,24 @@ def get_embedding_model():
 
 
 def create_embeddings(text, chunk_size=450):
+
+    logger.info(f"Creating embeddings for text length={len(text)}")
+
     words = text.split()
     chunks = []
 
     for i in range(0, len(words), chunk_size):
         chunks.append(" ".join(words[i:i+chunk_size]))
 
+    logger.info(f"Chunks created: {len(chunks)}")
+
     model = get_embedding_model()
     emb = model.encode(chunks)
 
+    logger.info("Embeddings generated successfully")
+
     return chunks, emb.tolist()
+
 
 # TEMPORARY EMBEDDING STUB (NO ML, NO MODELS)
 # def create_embeddings(text, chunk_size=450):
@@ -108,12 +118,18 @@ def create_embeddings(text, chunk_size=450):
 #     return chunks, embeddings
 
 
-# ---------------- CHROMA ----------------
+# CHROMA
+
+def chroma_collection_name(user_id, chat_id):
+    raw = f"{user_id}_{chat_id}"
+    short = hashlib.md5(raw.encode()).hexdigest()[:24]
+    return f"uc_{short}"
 
 def get_chroma_client():
     global _chroma_client
 
     if _chroma_client is None:
+        logger.info("Initializing Chroma client at ./chroma_db")
         _chroma_client = PersistentClient(path="./chroma_db")
 
     return _chroma_client
@@ -121,8 +137,12 @@ def get_chroma_client():
 
 def store_embeddings_in_chroma(user_id, chat_id, pdf_id, tagged_chunks, embeddings, pdf_type):
 
+    logger.info(f"Storing embeddings → user={user_id} chat={chat_id} pdf={pdf_id}")
+
     client = get_chroma_client()
-    name = f"user_{user_id}_chat_{chat_id}"
+    name = chroma_collection_name(user_id, chat_id)
+
+    logger.info(f"Using Chroma collection: {name}")
 
     collection = client.get_or_create_collection(name=name)
 
@@ -139,21 +159,41 @@ def store_embeddings_in_chroma(user_id, chat_id, pdf_id, tagged_chunks, embeddin
 
     collection.add(documents=docs, embeddings=embeddings, ids=ids, metadatas=meta)
 
+    logger.info(f"Stored {len(docs)} embeddings in Chroma")
 
 
 
-def fetch_topic_chunks(collection, topic, pdf_priority="notes"):
+
+
+# def fetch_topic_chunks(collection, topic, pdf_priority="notes"):
+
+#     res = collection.query(
+#         query_texts=[topic],
+#         where={"topics": {"$contains": topic}},
+#         n_results=8
+#     )
+
+#     if res and res.get("documents"):
+#         return "\n".join(res["documents"][0])
+
+#     return ""
+
+def fetch_topic_chunks(collection, topic):
+
+    logger.info(f"Querying Chroma for topic: {topic}")
 
     res = collection.query(
         query_texts=[topic],
-        where={"topics": {"$contains": topic}},
         n_results=8
     )
 
     if res and res.get("documents"):
+        logger.info(f"Chunks found: {len(res['documents'][0])}")
         return "\n".join(res["documents"][0])
 
+    logger.warning("No chunks found")
     return ""
+
 
 
 # =====================================================
@@ -208,7 +248,7 @@ def fetch_topic_chunks(collection, topic, pdf_priority="notes"):
 #     return "\n".join(matched[:8])
 
 
-# ---------------- TOPIC TAGGING ----------------
+# TOPIC TAGGING 
 
 def tag_chunk_with_topics(chunk, topic_tree):
     matched = []
@@ -223,7 +263,7 @@ def tag_chunk_with_topics(chunk, topic_tree):
     return matched
 
 
-# ---------------- GEMINI JSON SAFE ----------------
+# GEMINI JSON SAFE 
 
 def safe_json_extract(text):
     try:
@@ -235,7 +275,7 @@ def safe_json_extract(text):
     return []
 
 
-# ---------------- SYLLABUS EXTRACTION ----------------
+# SYLLABUS EXTRACTION
 
 def extract_topic_tree_from_text(text):
 
@@ -256,7 +296,7 @@ Return ONLY JSON array:
         return [{"unit": "General", "topic": "General"}]
     
 
-# ---------------- WEAK TOPIC DETECTION ----------------
+# WEAK TOPIC DETECTION 
 def update_weak_topics(existing, new_topics):
     """
     existing: dict
@@ -291,16 +331,40 @@ Return ONLY one word.
     return "notes"
 
 
+# def compute_topic_weights(collection):
+#     counts = {}
+#     total = 0
+
+#     for item in collection:
+#         for t in item["topics"]:
+#             counts[t] = counts.get(t, 0) + 1
+#             total += 1
+
+#     return {t: c / total for t, c in counts.items()} if total else {}
+
+
 def compute_topic_weights(collection):
+
+    data = collection.get(include=["metadatas"])
+    metas = data.get("metadatas", [])
+
+    logger.info(f"Chroma metadata count: {len(metas)}")
+
     counts = {}
     total = 0
 
-    for item in collection:
-        for t in item["topics"]:
+    for m in metas:
+        topics = m.get("topics", "").split(",")
+        for t in topics:
             counts[t] = counts.get(t, 0) + 1
             total += 1
 
-    return {t: c / total for t, c in counts.items()} if total else {}
+    weights = {t: c/total for t, c in counts.items()} if total else {}
+
+    logger.info(f"Computed topic weights: {weights}")
+
+    return weights
+
 
 
 # def distribute_questions(weights, total_q):
@@ -463,3 +527,45 @@ Return JSON array:
 
     raw = call_gemini(prompt)
     return safe_json_extract(raw)
+
+def analyze_pdf_intelligence(text):
+    prompt = f"""
+Analyze this academic PDF.
+
+Tasks:
+1. Classify type: syllabus | notes | question_paper
+2. If syllabus → extract units & topics
+3. If question_paper → infer exam pattern
+4. Infer topics if syllabus missing
+
+Return ONLY JSON:
+{{
+  "type": "syllabus|notes|question_paper",
+  "topics": [{{"unit":"Unit","topic":"Topic"}}],
+  "examPattern": {{
+    "mcq": {{"count": 0, "marks": 0}},
+    "descriptive": {{"count": 0, "marks": 0}}
+  }}
+}}
+
+{text[:8000]}
+"""
+    raw = call_gemini(prompt)
+
+    try:
+        return json.loads(raw)
+    except:
+        return {
+            "type": "notes",
+            "topics": [{"unit": "General", "topic": "General"}],
+            "examPattern": {}
+        }
+
+
+def merge_context_by_topics(collection, topics, limit_per_topic=4):
+    merged = []
+    for t in topics:
+        ctx = fetch_topic_chunks(collection, t)
+        if ctx:
+            merged.append(f"\n### {t}\n{ctx}")
+    return "\n".join(merged)
