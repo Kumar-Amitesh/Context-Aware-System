@@ -6,15 +6,30 @@ from logger import get_logger
 
 logger = get_logger("gemini")
 
+class NonRetryableError(Exception):
+    pass
 
 GEMINI_API_KEY = ""
 
-genai.configure(api_key=GEMINI_API_KEY)
+# genai.configure(api_key=GEMINI_API_KEY)
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    logger.error("GEMINI_API_KEY not set. Gemini calls will fail.")
 
 _model = None
 
+# def get_gemini_model():
+#     global _model
+#     if _model is None:
+#         _model = genai.GenerativeModel("gemini-2.5-flash")
+#     return _model
+
 def get_gemini_model():
     global _model
+    if not GEMINI_API_KEY:
+        raise NonRetryableError("GEMINI_API_KEY is not set")
     if _model is None:
         _model = genai.GenerativeModel("gemini-2.5-flash")
     return _model

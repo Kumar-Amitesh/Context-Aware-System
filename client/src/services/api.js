@@ -27,6 +27,7 @@ export const authAPI = {
 export const chatAPI = {
   getChats: () => api.get('/chats'),
   createChat: (data) => api.post('/chats', data),
+  retryPDF: (pdfId) => api.post(`/pdfs/${pdfId}/retry`),
   uploadPDF: (chatId, file) => {
     const formData = new FormData();
     formData.append('pdf', file);
@@ -45,6 +46,9 @@ export const questionAPI = {
   generateWeakExam: (chatId) => api.post(`/chats/${chatId}/questions/generate/weak`),
   submitAnswers: (sessionId, answers) => 
     api.post(`/sessions/${sessionId}/submit`, { answers }),
+
+  // OPTIONAL (only if you add GET /api/sessions/<sid> backend)
+  // getSession: (sessionId) => api.get(`/sessions/${sessionId}`),
 };
 
 export default api;

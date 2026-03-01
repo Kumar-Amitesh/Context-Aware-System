@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 from celery_worker import process_pdf_task
 from extensions import db, celery
 from logger import get_logger
+import hashlib
 logger = get_logger("server")
 
 
@@ -31,6 +32,14 @@ celery.conf.update(app.config)
 
 with app.app_context():
     db.create_all()
+
+
+def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 # AUTH
@@ -125,8 +134,10 @@ def create_chat():
                 "chatId": chat.id,
                 "examType": chat.exam_type,
                 "createdAt": chat.created_at.isoformat(),
-                "weakTopics": chat.get_weak_topics_summary(),
-                "pdfCount": len(chat.pdfs)
+                # "weakTopics": chat.get_weak_topics_summary(),
+                "weakTopics": top_weak_topics(json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}, k=5),
+                "pdfCount": len(chat.pdfs),
+                "subject": (json.loads(chat.exam_config or "{}").get("subject"))
             }
             for chat in chats
         ])
@@ -153,6 +164,8 @@ def create_chat():
 def upload_pdf(chat_id):
 
     user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
     chat = Chat.query.get(chat_id)
 
     if not chat or chat.user_id != user.id:
@@ -166,12 +179,56 @@ def upload_pdf(chat_id):
 
     file.save(path)
 
+    file_hash = sha256_file(path)
+
+    existing = (PDFDocument.query
+        .filter_by(chat_id=chat_id, file_hash=file_hash)
+        .order_by(PDFDocument.uploaded_at.desc())
+        .first()
+    )
+
+    # ✅ Block re-upload if already uploaded and not failed
+    if existing and not existing.error and existing.is_processed:
+        return jsonify({
+            "error": "This PDF was already uploaded in this chat.",
+            "pdfId": existing.id,
+            "status": "duplicate"
+        }), 409
+
+    # ✅ If it exists but is pending/processing, also block
+    if existing and not existing.error and not existing.is_processed:
+        return jsonify({
+            "error": "This PDF is already uploaded and still processing.",
+            "pdfId": existing.id,
+            "status": "duplicate_processing"
+        }), 409
+
+    # ✅ If it exists and failed/error => REUSE + retry instead of creating new row
+    if existing and (existing.error or existing.pdf_type == "failed"):
+        existing.filename = original_name
+        existing.file_path = path
+        existing.file_hash = file_hash
+        existing.pdf_type = "pending"
+        existing.is_processed = False
+        existing.error = None
+        db.session.commit()
+
+        process_pdf_task.delay(existing.id, user.id, chat_id, path)
+
+        return jsonify({
+            "pdfId": existing.id,
+            "status": "requeued",
+            "processing": True
+        }), 202
+
+
     # PDF TYPE WILL BE DETECTED INSIDE CELERY
     pdf = PDFDocument(
         id=generate_id(),
         chat_id=chat_id,
         filename=original_name,
         file_path=path,
+        file_hash=file_hash,
         pdf_type="pending",     # temporary placeholder
         is_processed=False
     )
@@ -222,152 +279,565 @@ def list_pdfs(chat_id):
 
 # QUESTION GENERATION 
 
+# @app.route("/api/chats/<chat_id>/questions/generate/full", methods=["POST"])
+# def generate_full_exam(chat_id):
+#     logger.info("Generate full exam called")
+
+#     user = get_user_from_token()
+#     chat = Chat.query.get(chat_id)
+
+#     pending = PDFDocument.query.filter_by(chat_id=chat_id, is_processed=False).count()
+#     if pending > 0:
+#         return jsonify({"error": "PDFs still processing"}), 400
+
+#     exam_cfg = json.loads(chat.exam_config)
+
+#     mcq_cfg = exam_cfg.get("mcq")
+#     desc_cfg = exam_cfg.get("descriptive")
+
+#     bloom = chat.bloom_level or "understand"
+
+#     client = get_chroma_client()
+#     collection_name = chroma_collection_name(user.id, chat_id)
+#     logger.info(f"Using collection: {collection_name}")
+#     collection = client.get_or_create_collection(name=collection_name)
+#     logger.info(f"Collection count: {collection.count()}")
+
+    
+
+#     # ---------- NO PDF FALLBACK ----------
+#     # if collection.count() == 0:
+#     #     questions = generate_without_pdfs(chat, user)
+
+#     #     session = PracticeSession(
+#     #         id=generate_id(),
+#     #         chat_id=chat_id,
+#     #         session_type="full_fallback",
+#     #         questions=json.dumps(questions)
+#     #     )
+#     #     db.session.add(session)
+#     #     db.session.commit()
+
+#     #     return jsonify({
+#     #         "sessionId": session.id,
+#     #         "questions": questions,
+#     #         "fallback": True
+#     #     })
+
+#     # weights = compute_topic_weights(collection)
+
+#     questions = []
+
+#     # ---------------- MCQ GENERATION ----------------
+
+# #     if mcq_cfg:
+
+# #         allocation = distribute_questions(weights, mcq_cfg["count"])
+
+# #         for topic, count in allocation.items():
+
+# #             ctx = fetch_topic_chunks(collection, topic)
+
+# #             prompt = f"""
+# # Generate {count} MCQs.
+
+# # Rules:
+# # - 4 options
+# # - single correct
+# # - Bloom level: {bloom}
+# # - Difficulty: moderate
+
+# # Topic: {topic}
+
+# # Context:
+# # {ctx}
+
+# # Return JSON array:
+# # [
+# #  {{
+# #   "id":"q1",
+# #   "type":"mcq",
+# #   "question":"...",
+# #   "options":["A","B","C","D"],
+# #   "answer":"A"
+# #  }}
+# # ]
+# # """
+
+# #             raw = call_gemini(prompt)
+# #             qs = safe_json_extract(raw)
+# #             weak_topics = json.loads(chat.weak_topics_json) if chat.weak_topics_json else []
+
+# #             for q in qs:
+# #                 duplicate = is_duplicate(
+# #                     chat_id=chat_id,
+# #                     question=q["question"],
+# #                     topic=topic,
+# #                     weak_topics=weak_topics
+# #                 )
+
+# #                 if duplicate:
+# #                     continue 
+# #                 q["topic"] = topic
+# #                 questions.append(q)
+
+
+#     weights = compute_topic_weights(collection)
+#     topics = list(weights.keys())
+
+#     merged_context = merge_context_by_topics(collection, topics)
+
+#     prompt = f"""
+#     Generate {mcq_cfg["count"]} MCQs.
+
+#     Topic weight distribution:
+#     {json.dumps(weights, indent=2)}
+
+#     Rules:
+#     - Bloom level: {bloom}
+#     - 4 options
+#     - One correct answer
+#     - Moderate difficulty
+
+#     Context:
+#     {merged_context}
+
+#     Return JSON array with fields:
+#     id, type="mcq", question, options, answer, topic
+#     """
+
+#     raw = call_gemini(prompt)
+#     questions += safe_json_extract(raw)
+
+
+#     # DESCRIPTIVE GENERATION 
+
+# #     if desc_cfg:
+
+# #         allocation = distribute_questions(weights, desc_cfg["count"])
+
+# #         for topic, count in allocation.items():
+
+# #             ctx = fetch_topic_chunks(collection, topic)
+
+# #             prompt = f"""
+# # Generate {count} descriptive questions.
+
+# # Marks per question: {desc_cfg["marks"]}
+# # Bloom Level: {bloom}
+
+# # Topic: {topic}
+
+# # Context:
+# # {ctx}
+
+# # Return ONLY JSON array.
+# # """
+
+# #             raw = call_gemini(prompt)
+# #             qs = safe_json_extract(raw)
+
+# #             weak_topics = json.loads(chat.weak_topics_json) if chat.weak_topics_json else []
+
+# #             for q in qs:
+# #                 duplicate = is_duplicate(
+# #                     chat_id=chat_id,
+# #                     question=q["question"],
+# #                     topic=topic,
+# #                     weak_topics=weak_topics
+# #                 )
+
+# #                 if duplicate:
+# #                     continue 
+# #                 q["topic"] = topic
+# #                 questions.append(q)
+
+#     prompt = f"""
+#     Generate {desc_cfg["count"]} descriptive questions.
+
+#     Topic weight distribution:
+#     {json.dumps(weights, indent=2)}
+
+#     Bloom level: {bloom}
+#     Marks per question: {desc_cfg["marks"]}
+
+#     Context:
+#     {merged_context}
+
+#     Return JSON array with:
+#     id, type="descriptive", question, topic
+#     """
+
+#     raw = call_gemini(prompt)
+#     questions += safe_json_extract(raw)
+
+#     session_id = generate_id()
+#     for index, question in enumerate(questions):
+#         question["id"] = f"{session_id}_q{index + 1}"
+
+#     logger.info([q["id"] for q in questions])
+
+#     session = PracticeSession(
+#         id=session_id,
+#         chat_id=chat_id,
+#         session_type="full",
+#         questions=json.dumps(questions)
+#     )
+
+#     db.session.add(session)
+#     db.session.commit()
+
+#     return jsonify({
+#         "sessionId": session.id,
+#         "questions": questions
+#     })
+
+
+# -----------------------------
+# ✅ FULL EXAM ROUTE UPDATE
+# -----------------------------
+# @app.route("/api/chats/<chat_id>/questions/generate/full", methods=["POST"])
+# def generate_full_exam(chat_id):
+#     logger.info("Generate full exam called")
+
+#     user = get_user_from_token()
+#     chat = Chat.query.get(chat_id)
+
+#     pending = PDFDocument.query.filter_by(chat_id=chat_id, is_processed=False).count()
+#     if pending > 0:
+#         return jsonify({"error": "PDFs still processing"}), 400
+
+#     exam_cfg = json.loads(chat.exam_config or "{}")
+#     mcq_cfg = exam_cfg.get("mcq")
+#     desc_cfg = exam_cfg.get("descriptive")
+#     bloom = chat.bloom_level or "understand"
+
+#     client = get_chroma_client()
+#     collection_name = chroma_collection_name(user.id, chat_id)
+#     logger.info(f"Using collection: {collection_name}")
+#     # collection = client.get_or_create_collection(name=collection_name)
+#     collection = get_chroma_collection(client, collection_name)
+#     logger.info(f"Collection count: {collection.count()}")
+
+#     questions = []
+
+#     # OLD
+#     # weights = compute_topic_weights(collection)
+#     # topics = list(weights.keys())
+#     # merged_context = merge_context_by_topics(collection, topics)
+
+#     # UPDATED: use ALL topics from DB for the chat (full subject coverage)
+#     db_topics = SubjectTopic.query.filter_by(chat_id=chat_id).all()
+#     topics = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
+
+#     weights = compute_topic_weights(collection)
+#     merged_context = merge_context_by_topics(collection, topics)
+
+#     # PYQ bias (optional)
+#     pyq_freq = exam_cfg.get("pyqTopicFrequency", {})
+
+#     # ---------------- MCQ GENERATION ----------------
+#     prompt = f"""
+# Generate {mcq_cfg["count"]} MCQs.
+
+# Allowed topics (choose topic EXACTLY from this list):
+# {json.dumps(topics, indent=2)}
+
+# If PYQ topic frequency is available, bias questions toward frequently asked topics:
+# PYQ topicFrequency:
+# {json.dumps(pyq_freq, indent=2)}
+
+# Topic weight distribution (optional bias):
+# {json.dumps(weights, indent=2)}
+
+# Rules:
+# - Bloom level: {bloom}
+# - 4 options
+# - One correct answer
+# - Moderate difficulty
+
+# Context:
+# {merged_context}
+
+# Return JSON array with fields:
+# id, type="mcq", question, options, answer, topic
+# """
+
+#     raw = call_gemini(prompt)
+#     questions += safe_json_extract(raw)
+#     # allowed topics from DB
+#     db_topics = SubjectTopic.query.filter_by(chat_id=chat_id).all()
+#     allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
+
+#     # normalize topics returned by Gemini
+#     for q in questions:
+#         q["topic"] = map_to_closest_topic(q.get("topic", ""), allowed, threshold=0.35)
+
+#     # ---------------- DESCRIPTIVE GENERATION ----------------
+#     prompt = f"""
+# Generate {desc_cfg["count"]} descriptive questions.
+
+# Allowed topics (choose topic EXACTLY from this list):
+# {json.dumps(topics, indent=2)}
+
+# If PYQ topic frequency is available, bias questions toward frequently asked topics:
+# PYQ topicFrequency:
+# {json.dumps(pyq_freq, indent=2)}
+
+# Bloom level: {bloom}
+# Marks per question: {desc_cfg["marks"]}
+
+# Context:
+# {merged_context}
+
+# Return JSON array with:
+# id, type="descriptive", question, topic
+# """
+
+#     raw = call_gemini(prompt)
+#     questions += safe_json_extract(raw)
+#     # allowed topics from DB
+#     db_topics = SubjectTopic.query.filter_by(chat_id=chat_id).all()
+#     allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
+
+#     # normalize topics returned by Gemini
+#     for q in questions:
+#         q["topic"] = map_to_closest_topic(q.get("topic", ""), allowed, threshold=0.35)
+
+#     session_id = generate_id()
+#     for index, question in enumerate(questions):
+#         question["id"] = f"{session_id}_q{index + 1}"
+
+#     logger.info([q["id"] for q in questions])
+
+#     session = PracticeSession(
+#         id=session_id,
+#         chat_id=chat_id,
+#         session_type="full",
+#         questions=json.dumps(questions)
+#     )
+
+#     db.session.add(session)
+#     db.session.commit()
+
+#     return jsonify({
+#         "sessionId": session.id,
+#         "questions": questions
+#     })
+
+
 @app.route("/api/chats/<chat_id>/questions/generate/full", methods=["POST"])
 def generate_full_exam(chat_id):
     logger.info("Generate full exam called")
 
     user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
     chat = Chat.query.get(chat_id)
+    if not chat or chat.user_id != user.id:
+        return jsonify({"error": "invalid chat"}), 403
 
     pending = PDFDocument.query.filter_by(chat_id=chat_id, is_processed=False).count()
     if pending > 0:
         return jsonify({"error": "PDFs still processing"}), 400
 
-    exam_cfg = json.loads(chat.exam_config)
-
-    mcq_cfg = exam_cfg.get("mcq")
-    desc_cfg = exam_cfg.get("descriptive")
-
+    exam_cfg = json.loads(chat.exam_config or "{}")
+    mcq_cfg = exam_cfg.get("mcq") or {"count": 0, "marks": 1}
+    desc_cfg = exam_cfg.get("descriptive") or {"count": 0, "marks": 10}
     bloom = chat.bloom_level or "understand"
 
     client = get_chroma_client()
     collection_name = chroma_collection_name(user.id, chat_id)
-    logger.info(f"Using collection: {collection_name}")
-    collection = client.get_or_create_collection(name=collection_name)
-    logger.info(f"Collection count: {collection.count()}")
+    collection = get_chroma_collection(client, collection_name)
 
-    
+    # allowed topics from DB
+    db_topics = SubjectTopic.query.filter_by(chat_id=chat_id).all()
+    allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
 
-    # ---------- NO PDF FALLBACK ----------
-    # if collection.count() == 0:
-    #     questions = generate_without_pdfs(chat, user)
+    weights = compute_topic_weights(collection)
+    weights_small = top_n_weights(weights, n=10)
+    # merged_context = merge_context_by_topics(collection, allowed)
+    # Keep context small so you don't blow TPM
+    merged_context = merge_context_by_topics_budgeted(
+        collection,
+        allowed,
+        per_topic_results=2,
+        max_chars=12000,
+        max_chars_per_topic=900
+    )
 
-    #     session = PracticeSession(
-    #         id=generate_id(),
-    #         chat_id=chat_id,
-    #         session_type="full_fallback",
-    #         questions=json.dumps(questions)
-    #     )
-    #     db.session.add(session)
-    #     db.session.commit()
-
-    #     return jsonify({
-    #         "sessionId": session.id,
-    #         "questions": questions,
-    #         "fallback": True
-    #     })
-
-    # weights = compute_topic_weights(collection)
+    pyq_freq = exam_cfg.get("pyqTopicFrequency", {}) or {}
 
     questions = []
 
-    # ---------------- MCQ GENERATION ----------------
+    # MCQs
+    if mcq_cfg.get("count", 0) > 0:
+        prompt = f"""
+Generate {mcq_cfg["count"]} MCQs.
 
+Allowed topics (choose topic EXACTLY from this list):
+{json.dumps(allowed, indent=2)}
+
+If PYQ topic frequency is available, bias questions toward frequently asked topics:
+PYQ topicFrequency:
+{json.dumps(pyq_freq, indent=2)}
+
+Topic weight distribution (optional bias): 
+{json.dumps(weights_small, indent=2)}
+
+Rules:
+- Bloom level: {bloom}
+- 4 options
+- One correct answer
+- Moderate difficulty
+
+Context:
+{merged_context}
+
+Return JSON array with fields:
+id, type="mcq", question, options, answer, topic
+"""
+        raw = call_gemini(prompt)
+        questions += safe_json_extract(raw)
+
+    # Descriptive
+    if desc_cfg.get("count", 0) > 0:
+        prompt = f"""
+Generate {desc_cfg["count"]} descriptive questions.
+
+Allowed topics (choose topic EXACTLY from this list):
+{json.dumps(allowed, indent=2)}
+
+If PYQ topic frequency is available, bias questions toward frequently asked topics:
+PYQ topicFrequency:
+{json.dumps(pyq_freq, indent=2)}
+
+Bloom level: {bloom}
+Marks per question: {desc_cfg["marks"]}
+
+Context:
+{merged_context}
+
+Return JSON array with:
+id, type="descriptive", question, topic
+"""
+        raw = call_gemini(prompt)
+        questions += safe_json_extract(raw)
+
+    # ✅ Normalize ALL topics once
+    for q in questions:
+        q["topic"] = map_to_closest_topic(q.get("topic", ""), allowed, threshold=0.35)
+
+    # assign ids
+    session_id = generate_id()
+    for i, q in enumerate(questions):
+        q["id"] = f"{session_id}_q{i+1}"
+
+    session = PracticeSession(
+        id=session_id,
+        chat_id=chat_id,
+        session_type="full",
+        questions=json.dumps(questions)
+    )
+    db.session.add(session)
+    db.session.commit()
+
+    return jsonify({"sessionId": session.id, "questions": questions})
+
+
+
+# -----------------------------
+# ✅ WEAK ROUTE UPDATE
+# (fix wrong collection name + use weak topics properly)
+# -----------------------------
+# @app.route("/api/chats/<chat_id>/questions/generate/weak", methods=["POST"])
+# def generate_weak_exam(chat_id):
+
+#     user = get_user_from_token()
+#     chat = Chat.query.get(chat_id)
+
+#     weak_topics_map = json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}
+
+#     if not weak_topics_map:
+#         return jsonify({"error": "No weak topics"}), 400
+
+#     exam_cfg = json.loads(chat.exam_config or "{}")
+#     mcq_cfg = exam_cfg.get("mcq")
+#     desc_cfg = exam_cfg.get("descriptive")
+#     bloom = chat.bloom_level or "understand"
+
+#     client = get_chroma_client()
+
+#     # OLD (wrong collection name)
+#     # collection = client.get(f"user_{user.id}_chat_{chat_id}", [])
+
+#     # UPDATED (use hashed collection name)
+#     collection_name = chroma_collection_name(user.id, chat_id)
+#     # collection = client.get_or_create_collection(name=collection_name)
+#     collection = get_chroma_collection(client, collection_name)
+
+#     # weak_topics = list(weak_topics_map.keys())
+#     # UPDATED: prefer topics with higher weakness count (no extra LLM calls)
+#     # weak_topics = sorted(
+#     #     weak_topics_map.keys(),
+#     #     key=lambda t: weak_topics_map.get(t, 0),
+#     #     reverse=True
+#     # )
+#     weak_topics = sorted(
+#         weak_topics_map.keys(),
+#         key=lambda t: (weak_topics_map.get(t, {}).get("score", 0.0), weak_topics_map.get(t, {}).get("seen", 0)),
+#         reverse=True
+#     )
+#     questions = []
+
+#     # WEAK MCQs
 #     if mcq_cfg:
+#         per_topic = max(1, mcq_cfg["count"] // len(weak_topics))
 
-#         allocation = distribute_questions(weights, mcq_cfg["count"])
-
-#         for topic, count in allocation.items():
-
+#         for topic in weak_topics:
 #             ctx = fetch_topic_chunks(collection, topic)
 
 #             prompt = f"""
-# Generate {count} MCQs.
+# Generate {per_topic} MCQs for REMEDIAL PRACTICE.
 
 # Rules:
-# - 4 options
-# - single correct
+# - Focus on conceptual mistakes
 # - Bloom level: {bloom}
-# - Difficulty: moderate
+# - 4 options
+# - One correct answer
 
 # Topic: {topic}
 
 # Context:
 # {ctx}
 
-# Return JSON array:
-# [
-#  {{
-#   "id":"q1",
-#   "type":"mcq",
-#   "question":"...",
-#   "options":["A","B","C","D"],
-#   "answer":"A"
-#  }}
-# ]
+# Return JSON array.
 # """
-
 #             raw = call_gemini(prompt)
 #             qs = safe_json_extract(raw)
-#             weak_topics = json.loads(chat.weak_topics_json) if chat.weak_topics_json else []
 
 #             for q in qs:
-#                 duplicate = is_duplicate(
-#                     chat_id=chat_id,
-#                     question=q["question"],
-#                     topic=topic,
-#                     weak_topics=weak_topics
-#                 )
-
-#                 if duplicate:
-#                     continue 
 #                 q["topic"] = topic
 #                 questions.append(q)
 
+#             if len([q for q in questions if q["type"] == "mcq"]) >= mcq_cfg["count"]:
+#                 break
 
-    weights = compute_topic_weights(collection)
-    topics = list(weights.keys())
-
-    merged_context = merge_context_by_topics(collection, topics)
-
-    prompt = f"""
-    Generate {mcq_cfg["count"]} MCQs.
-
-    Topic weight distribution:
-    {json.dumps(weights, indent=2)}
-
-    Rules:
-    - Bloom level: {bloom}
-    - 4 options
-    - One correct answer
-    - Moderate difficulty
-
-    Context:
-    {merged_context}
-
-    Return JSON array with fields:
-    id, type="mcq", question, options, answer, topic
-    """
-
-    # raw = call_gemini(prompt)
-    questions += safe_json_extract(raw)
-
-
-    # DESCRIPTIVE GENERATION 
-
+#     # WEAK DESCRIPTIVE
 #     if desc_cfg:
+#         per_topic = max(1, desc_cfg["count"] // len(weak_topics))
 
-#         allocation = distribute_questions(weights, desc_cfg["count"])
-
-#         for topic, count in allocation.items():
-
+#         for topic in weak_topics:
 #             ctx = fetch_topic_chunks(collection, topic)
 
 #             prompt = f"""
-# Generate {count} descriptive questions.
+# Generate {per_topic} DESCRIPTIVE REMEDIAL questions.
 
-# Marks per question: {desc_cfg["marks"]}
-# Bloom Level: {bloom}
+# Rules:
+# - Focus on weak understanding
+# - Emphasize concepts and reasoning
+# - Bloom Level: {bloom}
 
 # Topic: {topic}
 
@@ -376,95 +846,75 @@ def generate_full_exam(chat_id):
 
 # Return ONLY JSON array.
 # """
-
 #             raw = call_gemini(prompt)
 #             qs = safe_json_extract(raw)
 
-#             weak_topics = json.loads(chat.weak_topics_json) if chat.weak_topics_json else []
-
 #             for q in qs:
-#                 duplicate = is_duplicate(
-#                     chat_id=chat_id,
-#                     question=q["question"],
-#                     topic=topic,
-#                     weak_topics=weak_topics
-#                 )
-
-#                 if duplicate:
-#                     continue 
 #                 q["topic"] = topic
 #                 questions.append(q)
 
-    prompt = f"""
-    Generate {desc_cfg["count"]} descriptive questions.
+#             if len([q for q in questions if q["type"] == "descriptive"]) >= desc_cfg["count"]:
+#                 break
 
-    Topic weight distribution:
-    {json.dumps(weights, indent=2)}
+#     session = PracticeSession(
+#         id=generate_id(),
+#         chat_id=chat_id,
+#         session_type="weak",
+#         questions=json.dumps(questions)
+#     )
 
-    Bloom level: {bloom}
-    Marks per question: {desc_cfg["marks"]}
+#     db.session.add(session)
+#     db.session.commit()
 
-    Context:
-    {merged_context}
+#     return jsonify({
+#         "sessionId": session.id,
+#         "questions": questions
+#     })
 
-    Return JSON array with:
-    id, type="descriptive", question, topic
-    """
-
-    raw = call_gemini(prompt)
-    questions += safe_json_extract(raw)
-
-    session = PracticeSession(
-        id=generate_id(),
-        chat_id=chat_id,
-        session_type="full",
-        questions=json.dumps(questions)
-    )
-
-    db.session.add(session)
-    db.session.commit()
-
-    return jsonify({
-        "sessionId": session.id,
-        "questions": questions
-    })
 
 
 @app.route("/api/chats/<chat_id>/questions/generate/weak", methods=["POST"])
 def generate_weak_exam(chat_id):
-
     user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
     chat = Chat.query.get(chat_id)
+    if not chat or chat.user_id != user.id:
+        return jsonify({"error": "invalid chat"}), 403
 
     weak_topics_map = json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}
-
     if not weak_topics_map:
         return jsonify({"error": "No weak topics"}), 400
 
-    exam_cfg = json.loads(chat.exam_config)
-
-    mcq_cfg = exam_cfg.get("mcq")
-    desc_cfg = exam_cfg.get("descriptive")
-
+    exam_cfg = json.loads(chat.exam_config or "{}")
+    mcq_cfg = exam_cfg.get("mcq") or {"count": 0, "marks": 1}
+    desc_cfg = exam_cfg.get("descriptive") or {"count": 0, "marks": 10}
     bloom = chat.bloom_level or "understand"
 
     client = get_chroma_client()
-    collection = client.get(f"user_{user.id}_chat_{chat_id}", [])
+    collection_name = chroma_collection_name(user.id, chat_id)
+    collection = get_chroma_collection(client, collection_name)
 
-    weak_topics = list(weak_topics_map.keys())
+    # allowed topics from DB
+    db_topics = SubjectTopic.query.filter_by(chat_id=chat_id).all()
+    allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
+
+    # sort weak topics by score/seen
+    weak_topics = sorted(
+        weak_topics_map.keys(),
+        key=lambda t: (weak_topics_map.get(t, {}).get("score", 0.0),
+                       weak_topics_map.get(t, {}).get("seen", 0)),
+        reverse=True
+    )
 
     questions = []
 
-    # WEAK MCQs
-
-    if mcq_cfg:
-
-        per_topic = max(1, mcq_cfg["count"] // len(weak_topics))
-
+    # MCQs
+    if mcq_cfg.get("count", 0) > 0:
+        per_topic = max(1, mcq_cfg["count"] // max(len(weak_topics), 1))
         for topic in weak_topics:
-
             ctx = fetch_topic_chunks(collection, topic)
-
             prompt = f"""
 Generate {per_topic} MCQs for REMEDIAL PRACTICE.
 
@@ -481,27 +931,20 @@ Context:
 
 Return JSON array.
 """
-
             raw = call_gemini(prompt)
-            qs = safe_json_extract(raw)
-
+            qs = safe_json_extract(raw) or []
             for q in qs:
                 q["topic"] = topic
                 questions.append(q)
 
-            if len([q for q in questions if q["type"] == "mcq"]) >= mcq_cfg["count"]:
+            if len([q for q in questions if q.get("type") == "mcq"]) >= mcq_cfg["count"]:
                 break
 
-    # WEAK DESCRIPTIVE
-
-    if desc_cfg:
-
-        per_topic = max(1, desc_cfg["count"] // len(weak_topics))
-
+    # Descriptive
+    if desc_cfg.get("count", 0) > 0:
+        per_topic = max(1, desc_cfg["count"] // max(len(weak_topics), 1))
         for topic in weak_topics:
-
             ctx = fetch_topic_chunks(collection, topic)
-
             prompt = f"""
 Generate {per_topic} DESCRIPTIVE REMEDIAL questions.
 
@@ -517,183 +960,398 @@ Context:
 
 Return ONLY JSON array.
 """
-
             raw = call_gemini(prompt)
-            qs = safe_json_extract(raw)
-
+            qs = safe_json_extract(raw) or []
             for q in qs:
                 q["topic"] = topic
                 questions.append(q)
 
-            if len([q for q in questions if q["type"] == "descriptive"]) >= desc_cfg["count"]:
+            if len([q for q in questions if q.get("type") == "descriptive"]) >= desc_cfg["count"]:
                 break
 
+    # ✅ Normalize topics (even here)
+    for q in questions:
+        q["topic"] = map_to_closest_topic(q.get("topic", ""), allowed, threshold=0.35)
+
+    session_id = generate_id()
+    for i, q in enumerate(questions):
+        q["id"] = f"{session_id}_q{i+1}"
+
     session = PracticeSession(
-        id=generate_id(),
+        id=session_id,
         chat_id=chat_id,
         session_type="weak",
         questions=json.dumps(questions)
     )
-
     db.session.add(session)
     db.session.commit()
 
-    return jsonify({
-        "sessionId": session.id,
-        "questions": questions
-    })
+    return jsonify({"sessionId": session.id, "questions": questions})
 
 
 # ANSWER SUBMIT
 
-@app.route("/api/sessions/<sid>/submit", methods=["POST"])
-def submit_answers(sid):
 
-    user = get_user_from_token()
-    session = PracticeSession.query.get(sid)
+# @app.route("/api/sessions/<sid>/submit", methods=["POST"])
+# def submit_answers(sid):
+#     user = get_user_from_token()
+#     session = PracticeSession.query.get(sid)
+#     if not session:
+#         return jsonify({"error": "invalid session"}), 404
 
-    chat = Chat.query.get(session.chat_id)
+#     chat = Chat.query.get(session.chat_id)
+#     if not chat or chat.user_id != user.id:
+#         return jsonify({"error": "unauthorized"}), 403
 
-    if chat.user_id != user.id:
-        return jsonify({"error": "unauthorized"}), 403
+#     data = request.json
+#     answers = data.get("answers", {})
+#     questions = json.loads(session.questions or "[]")
 
-    data = request.json
-    answers = data["answers"]
+#     results = {}
+#     weak_topics = []
+#     topic_events = []
 
-    questions = json.loads(session.questions)
-
-    total = 0
-    count = 0
-
-    weak_topics = []
-    feedback = {}  
+#     # ---------- 1) MCQs: deterministic grading ----------
+#     mcq_payload_for_explanations = []
 
 #     for q in questions:
-#         ans = answers.get(q["id"], "")
-#         if not ans:
+#         qid = q["id"]
+#         user_ans = answers.get(qid)
+#         if user_ans is None or user_ans == "":
 #             continue
 
-#         eval_prompt = f"""
-# You are an AI tutor.
+#         if q["type"] == "mcq":
+#             correct = q.get("answer")
+#             is_correct = (user_ans == correct)
+#             db_topics = SubjectTopic.query.filter_by(chat_id=chat.id).all()
+#             allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
 
-# Evaluate student's understanding based on KEY CONCEPTS.
+#             topic_name = map_to_closest_topic(q.get("topic", "General"), allowed)
+#             topic_events.append({"topic": topic_name, "correct": is_correct})
 
-# Do NOT grade like exam.
-# Do NOT penalize grammar.
-# Focus on:
+#             results[qid] = {
+#                 "type": "mcq",
+#                 "topic": q.get("topic", "General"),
+#                 "question": q.get("question"),
+#                 "userAnswer": user_ans,
+#                 "correctAnswer": correct,
+#                 "isCorrect": is_correct,
+#                 "understandingScore": 10 if is_correct else 0,
+#                 "explanation": ""  # fill next
+#             }
 
-# - conceptual correctness
-# - important idea coverage
-# - reasoning quality
+#             if not is_correct:
+#                 weak_topics.append(q.get("topic", "General"))
+#                 mcq_payload_for_explanations.append({
+#                     "id": qid,
+#                     "question": q.get("question"),
+#                     "options": q.get("options", []),
+#                     "correctAnswer": correct,
+#                     "userAnswer": user_ans
+#                 })
 
-# Question:
-# {q['question']}
+#     # Generate explanations for wrong MCQs (optional: do for all)
+#     if mcq_payload_for_explanations:
+#         exp_prompt = f"""
+# Generate short, student-friendly explanations for WHY the correct option is correct.
 
-# Student Answer:
-# {ans}
+# Return ONLY JSON object keyed by question id:
+# {{
+#   "<question_id>": {{
+#     "explanation": "..."
+#   }}
+# }}
 
-# Return ONLY JSON:
+# Data:
+# {json.dumps(mcq_payload_for_explanations, indent=2)}
+# """
+#         exp_result = call_gemini(exp_prompt, expect_json=True)
+
+#         for item in mcq_payload_for_explanations:
+#             qid = item["id"]
+#             if qid in results:
+#                 results[qid]["explanation"] = exp_result.get(qid, {}).get("explanation", "")
+
+#     # ---------- 2) Descriptive: Gemini evaluation + explanation ----------
+#     desc_payload = []
+#     for q in questions:
+#         qid = q["id"]
+#         user_ans = answers.get(qid)
+#         if not user_ans:
+#             continue
+#         if q["type"] == "descriptive":
+#             desc_payload.append({
+#                 "id": qid,
+#                 "question": q["question"],
+#                 "answer": user_ans,
+#                 "topic": q.get("topic", "General")
+#             })
+
+#     if desc_payload:
+#         desc_prompt = f"""
+# Evaluate student understanding for descriptive answers.
+
+# Rules:
+# - Focus on conceptual correctness
+# - Ignore grammar
+# - Do NOT grade like an exam
+
+# Return ONLY JSON object keyed by the SAME question id:
 
 # {{
-#  "understandingScore": number between 0-10,
-#  "coveredConcepts": ["concept1","concept2"],
-#  "missingConcepts": ["conceptA","conceptB"]
+#   "<question_id>": {{
+#     "understandingScore": 0-10,
+#     "coveredConcepts": [],
+#     "missingConcepts": [],
+#     "sampleAnswer": "A good answer would mention...",
+#     "explanation": "Explain what was right/wrong and how to improve."
+#   }}
 # }}
+
+# Data:
+# {json.dumps(desc_payload, indent=2)}
 # """
+#         desc_result = call_gemini(desc_prompt, expect_json=True)
 
-#         result = call_gemini(eval_prompt)
+#         for item in desc_payload:
+#             qid = item["id"]
+#             r = desc_result.get(qid, {})
+#             score = r.get("understandingScore", 0)
+#             db_topics = SubjectTopic.query.filter_by(chat_id=chat.id).all()
+#             allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
 
-#         try:
-#             parsed = json.loads(result)
+#             topic_name = map_to_closest_topic(item.get("topic", "General"), allowed)
+#             topic_events.append({"topic": topic_name, "correct": (score >= 6)})
 
-#             score = parsed.get("understandingScore", 0)
-
-#             covered = parsed.get("coveredConcepts", [])
-#             missing = parsed.get("missingConcepts", [])
-#             feedback[q["id"]] = {
-#                 "covered": covered,
-#                 "missing": missing
+#             results[qid] = {
+#                 "type": "descriptive",
+#                 "topic": item.get("topic", "General"),
+#                 "question": item["question"],
+#                 "userAnswer": item["answer"],
+#                 "correctAnswer": None,
+#                 "isCorrect": None,
+#                 "understandingScore": score,
+#                 "covered": r.get("coveredConcepts", []),
+#                 "missing": r.get("missingConcepts", []),
+#                 "sampleAnswer": r.get("sampleAnswer", ""),
+#                 "explanation": r.get("explanation", "")
 #             }
-#         except:
-#             score = 0
 
-#         total += score
-#         count += 1
+#             if score < 6:
+#                 weak_topics.append(item.get("topic", "General"))
 
-#         if score < 6 or len(missing) > len(covered):
-#             weak_topics.append(q.get("topic", "General"))
+#     # ---------- 3) Overall score ----------
+#     scores = [v.get("understandingScore", 0) for v in results.values()]
+#     avg = sum(scores) / max(len(scores), 1)
 
-    payload = []
+#     session.score = avg
+#     session.answers = json.dumps(answers)
+#     session.weak_topics_json = json.dumps(weak_topics)
+#     session.feedback_json = json.dumps(results)   # store the detailed per-question review
+#     # ^ rename in UI, but keep in DB
+
+#     # Update chat weak topics counts
+#     # existing = json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}
+#     # updated = update_weak_topics(existing, weak_topics)
+#     # chat.weak_topics_json = json.dumps(updated)
+#     existing = json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}
+#     updated = update_topic_weakness(existing, topic_events, alpha=0.25)
+#     chat.weak_topics_json = json.dumps(updated)
+
+#     db.session.commit()
+#     weak_list = top_weak_topics(updated, k=5)
+#     return jsonify({
+#         "score": avg,
+#         "results": results,
+#         "weakTopics": updated,
+#         "weakTopicList": weak_list
+#     })
+
+
+@app.route("/api/sessions/<sid>/submit", methods=["POST"])
+def submit_answers(sid):
+    user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    session = PracticeSession.query.get(sid)
+    if not session:
+        return jsonify({"error": "invalid session"}), 404
+
+    chat = Chat.query.get(session.chat_id)
+    if not chat or chat.user_id != user.id:
+        return jsonify({"error": "unauthorized"}), 403
+
+    data = request.json or {}
+    answers = data.get("answers", {})
+    questions = json.loads(session.questions or "[]")
+
+    # ✅ get allowed topics ONCE
+    db_topics = SubjectTopic.query.filter_by(chat_id=chat.id).all()
+    allowed = [t.topic_name for t in db_topics if t.topic_name] or ["General"]
 
     for q in questions:
-        ans = answers.get(q["id"])
-        if ans:
-            payload.append({
-                "id": q["id"],
-                "question": q["question"],
-                "answer": ans,
+        q["topic"] = map_to_closest_topic(q.get("topic", ""), allowed, threshold=0.35)
+
+    results = {}
+    weak_topics = []
+    topic_events = []
+
+    # ---------- MCQs deterministic ----------
+    mcq_payload_for_explanations = []
+
+    for q in questions:
+        qid = q.get("id")
+        user_ans = answers.get(qid)
+        if not user_ans:
+            continue
+
+        if q.get("type") == "mcq":
+            correct = q.get("answer")
+            is_correct = (user_ans == correct)
+
+            topic_name = map_to_closest_topic(q.get("topic", "General"), allowed)
+
+            topic_events.append({"topic": topic_name, "correct": is_correct})
+
+            results[qid] = {
+                "type": "mcq",
+                "topic": topic_name,              # ✅ mapped
+                "question": q.get("question"),
+                "userAnswer": user_ans,
+                "correctAnswer": correct,
+                "isCorrect": is_correct,
+                "understandingScore": 10 if is_correct else 0,
+                "explanation": ""
+            }
+
+            if not is_correct:
+                weak_topics.append(topic_name)   # ✅ mapped
+                mcq_payload_for_explanations.append({
+                    "id": qid,
+                    "question": q.get("question"),
+                    "options": q.get("options", []),
+                    "correctAnswer": correct,
+                    "userAnswer": user_ans
+                })
+
+    if mcq_payload_for_explanations:
+        exp_prompt = f"""
+Generate short, student-friendly explanations for WHY the correct option is correct.
+
+Return ONLY JSON object keyed by question id:
+{{
+  "<question_id>": {{
+    "explanation": "..."
+  }}
+}}
+
+Data:
+{json.dumps(mcq_payload_for_explanations, indent=2)}
+"""
+        exp_result = call_gemini(exp_prompt, expect_json=True) or {}
+
+        for item in mcq_payload_for_explanations:
+            qid = item["id"]
+            if qid in results:
+                results[qid]["explanation"] = (exp_result.get(qid, {}) or {}).get("explanation", "")
+
+    # ---------- Descriptive LLM eval ----------
+    desc_payload = []
+    for q in questions:
+        qid = q.get("id")
+        user_ans = answers.get(qid)
+        if not user_ans:
+            continue
+        if q.get("type") == "descriptive":
+            desc_payload.append({
+                "id": qid,
+                "question": q.get("question"),
+                "answer": user_ans,
                 "topic": q.get("topic", "General")
             })
 
-    prompt = f"""
-    Evaluate student understanding.
+    if desc_payload:
+        desc_prompt = f"""
+Evaluate student understanding for descriptive answers.
 
-    Rules:
-    - Focus on conceptual correctness
-    - Ignore grammar
-    - Do NOT grade like an exam
+Rules:
+- Focus on conceptual correctness
+- Ignore grammar
+- Do NOT grade like an exam
 
-    Questions & answers:
-    {json.dumps(payload, indent=2)}
+Return ONLY JSON object keyed by the SAME question id:
 
-    Return JSON:
-    {{
-    "q1": {{
-        "understandingScore": 0-10,
-        "coveredConcepts": [],
-        "missingConcepts": []
-    }}
-    }}
-    """
+{{
+  "<question_id>": {{
+    "understandingScore": 0-10,
+    "coveredConcepts": [],
+    "missingConcepts": [],
+    "sampleAnswer": "A good answer would mention...",
+    "explanation": "Explain what was right/wrong and how to improve."
+  }}
+}}
 
-    raw = call_gemini(prompt)
-    result = json.loads(raw)
+Data:
+{json.dumps(desc_payload, indent=2)}
+"""
+        desc_result = call_gemini(desc_prompt, expect_json=True) or {}
 
-    for q in payload:
-        r = result.get(q["id"], {})
-        score = r.get("understandingScore", 0)
+        for item in desc_payload:
+            qid = item["id"]
+            r = desc_result.get(qid, {}) or {}
+            score = float(r.get("understandingScore", 0) or 0)
 
-        total += score
-        count += 1
+            topic_name = map_to_closest_topic(item.get("topic", "General"), allowed)  # ✅ item, not q
 
-        if score < 6:
-            weak_topics.append(q["topic"])
+            topic_events.append({"topic": topic_name, "correct": (score >= 6)})       # ✅ correct flag
 
-    feedback = result
+            results[qid] = {
+                "type": "descriptive",
+                "topic": topic_name,              # ✅ mapped
+                "question": item.get("question"),
+                "userAnswer": item.get("answer"),
+                "correctAnswer": None,
+                "isCorrect": None,
+                "understandingScore": score,
+                "covered": r.get("coveredConcepts", []),
+                "missing": r.get("missingConcepts", []),
+                "sampleAnswer": r.get("sampleAnswer", ""),
+                "explanation": r.get("explanation", "")
+            }
 
-    avg = total / max(count, 1)
+            if score < 6:
+                weak_topics.append(topic_name)     # ✅ mapped
+
+    # ---------- Overall ----------
+    scores = [float(v.get("understandingScore", 0) or 0) for v in results.values()]
+    avg = sum(scores) / max(len(scores), 1)
 
     session.score = avg
     session.answers = json.dumps(answers)
     session.weak_topics_json = json.dumps(weak_topics)
-    session.feedback_json = json.dumps(feedback)
+    session.feedback_json = json.dumps(results)
 
-    # UPDATE CHAT LEVEL
     existing = json.loads(chat.weak_topics_json) if chat.weak_topics_json else {}
-    updated = update_weak_topics(existing, weak_topics)
+    updated = update_topic_weakness(existing, topic_events, alpha=0.25)
     chat.weak_topics_json = json.dumps(updated)
 
     db.session.commit()
 
     return jsonify({
         "score": avg,
-        "feedback": feedback
+        "results": results,
+        "weakTopics": updated,
+        "weakTopicList": top_weak_topics(updated, k=5)
     })
+
 
 
 @app.route("/api/chats/<chat_id>/history", methods=["GET"])
 def chat_history(chat_id):
     user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
     chat = Chat.query.get(chat_id)
 
     if not chat or chat.user_id != user.id:
@@ -726,17 +1384,46 @@ def chat_history(chat_id):
 def debug_chroma(chat_id):
 
     user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
 
     client = get_chroma_client()
     name = chroma_collection_name(user.id, chat_id)
 
-    col = client.get_or_create_collection(name=name)
+    # col = client.get_or_create_collection(name=name)
+    col = get_chroma_collection(client, name)
 
     return {
         "collection": name,
         "count": col.count()
     }
 
+
+@app.route("/api/pdfs/<pdf_id>/retry", methods=["POST"])
+def retry_pdf(pdf_id):
+    user = get_user_from_token()
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    pdf = PDFDocument.query.get(pdf_id)
+    if not pdf:
+        return jsonify({"error": "not found"}), 404
+    
+    if not (pdf.error or pdf.pdf_type == "failed"):
+        return jsonify({"error": "PDF is not in failed state"}), 400
+
+    chat = Chat.query.get(pdf.chat_id)
+    if not chat or chat.user_id != user.id:
+        return jsonify({"error": "unauthorized"}), 403
+
+    pdf.is_processed = False
+    pdf.error = None
+    pdf.pdf_type = "pending"
+    db.session.commit()
+
+    process_pdf_task.delay(pdf.id, user.id, pdf.chat_id, pdf.file_path)
+
+    return jsonify({"status": "requeued"}), 202
 
 if __name__ == "__main__":
     app.run(debug=False, port=5000, host="0.0.0.0", use_reloader=False)
