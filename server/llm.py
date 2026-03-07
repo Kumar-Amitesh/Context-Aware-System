@@ -20,12 +20,6 @@ else:
 
 _model = None
 
-# def get_gemini_model():
-#     global _model
-#     if _model is None:
-#         _model = genai.GenerativeModel("gemini-2.5-flash")
-#     return _model
-
 def get_gemini_model():
     global _model
     if not GEMINI_API_KEY:
@@ -34,14 +28,6 @@ def get_gemini_model():
         _model = genai.GenerativeModel("gemini-2.5-flash")
     return _model
 
-
-# def call_gemini(prompt):
-#     model = get_gemini_model()
-#     response = model.generate_content(prompt)
-#     print("Gemini Prompt:", prompt)
-#     print("Gemini Response:", response)
-    
-#     return response.text
 
 def extract_json_block(text: str):
     """
