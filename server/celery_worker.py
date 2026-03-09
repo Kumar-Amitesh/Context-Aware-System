@@ -40,7 +40,15 @@ def process_pdf_task(self, pdf_id, user_id, chat_id, path):
                 "subject": "Unknown",
                 "topics": [{"unit": "Unit", "topic": "General"}],
                 "topicFrequency": {},
-                "examPattern": {}
+                # "examPattern": {}
+                "examPattern": {
+                    "questionTypes": {
+                        "mcq": {"count": 0, "marks": 0, "negativeMarks": 0},
+                        "fill_blank": {"count": 0, "marks": 0, "negativeMarks": 0},
+                        "true_false": {"count": 0, "marks": 0, "negativeMarks": 0},
+                        "descriptive": {"count": 0, "marks": 0, "negativeMarks": 0}
+                    }
+                }
             }
 
             # ---------- PDF TYPE ----------
@@ -60,7 +68,7 @@ def process_pdf_task(self, pdf_id, user_id, chat_id, path):
                 if detected_subject and detected_subject != "Unknown":
                     if existing_subject != "unknown" and detected_subject.strip().lower() != existing_subject:
                         pdf.error = f"Subject mismatch. Chat subject={base_cfg.get('subject')} but uploaded={detected_subject}"
-                        pdf.error = "Subject mismatch..."
+                        # pdf.error = "Subject mismatch..."
                         pdf.pdf_type = "failed"
                         pdf.is_processed = True
                         db.session.commit()
@@ -82,9 +90,59 @@ def process_pdf_task(self, pdf_id, user_id, chat_id, path):
                     ))
 
             # ---------- EXAM PATTERN (ONLY FOR PYQ) ----------
+            # if analysis["type"] == "question_paper" and analysis.get("examPattern"):
+            #     base = json.loads(chat.exam_config or "{}")
+            #     base.update(analysis["examPattern"])
+            #     chat.exam_config = json.dumps(base)
+
+            # if analysis["type"] == "question_paper" and analysis.get("examPattern"):
+            #     base = json.loads(chat.exam_config or "{}")
+
+            #     inferred_pattern = normalize_exam_pattern(analysis.get("examPattern") or {})
+            #     inferred_qtypes = inferred_pattern.get("questionTypes") or {}
+
+            #     existing_qtypes = base.get("questionTypes") or {}
+
+            #     merged_qtypes = {}
+            #     for qtype in ["mcq", "fill_blank", "true_false", "descriptive"]:
+            #         old_cfg = existing_qtypes.get(qtype) or {}
+            #         new_cfg = inferred_qtypes.get(qtype) or {}
+
+            #         merged_qtypes[qtype] = {
+            #             "count": int(new_cfg.get("count", old_cfg.get("count", 0)) or 0),
+            #             "marks": float(new_cfg.get("marks", old_cfg.get("marks", 0)) or 0),
+            #             "negativeMarks": (
+            #                 0.0 if qtype == "descriptive"
+            #                 else float(new_cfg.get("negativeMarks", old_cfg.get("negativeMarks", 0)) or 0)
+            #             ),
+            #         }
+
+            #     base["questionTypes"] = merged_qtypes
+            #     chat.exam_config = json.dumps(base)
+
             if analysis["type"] == "question_paper" and analysis.get("examPattern"):
                 base = json.loads(chat.exam_config or "{}")
-                base.update(analysis["examPattern"])
+
+                inferred_pattern = normalize_exam_pattern(analysis.get("examPattern") or {})
+                inferred_qtypes = inferred_pattern.get("questionTypes") or {}
+
+                existing_qtypes = base.get("questionTypes") or {}
+
+                merged_qtypes = {}
+                for qtype in ["mcq", "fill_blank", "true_false", "descriptive"]:
+                    old_cfg = existing_qtypes.get(qtype) or {}
+                    new_cfg = inferred_qtypes.get(qtype) or {}
+
+                    merged_qtypes[qtype] = {
+                        "count": int(old_cfg.get("count", new_cfg.get("count", 0)) or 0),
+                        "marks": float(old_cfg.get("marks", new_cfg.get("marks", 0)) or 0),
+                        "negativeMarks": (
+                            0.0 if qtype == "descriptive"
+                            else float(old_cfg.get("negativeMarks", new_cfg.get("negativeMarks", 0)) or 0)
+                        ),
+                    }
+
+                base["questionTypes"] = merged_qtypes
                 chat.exam_config = json.dumps(base)
 
             # ---------- PYQ TOPIC FREQUENCY (ONLY FOR PYQ) ----------

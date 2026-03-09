@@ -38,5 +38,5 @@ services:
     volumes:
       - C:/Docker_Data/postgres_data:/var/lib/postgresql/data
 
-volumes:
-  postgres_data:
+# volumes:
+#   postgres_data:

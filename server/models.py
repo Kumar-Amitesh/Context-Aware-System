@@ -22,7 +22,7 @@ class Chat(db.Model):
 
     exam_type = db.Column(db.String(50))
     exam_config = db.Column(db.Text)         # user + pyq calibrated
-    bloom_level = db.Column(db.String(20))
+    bloom_level = db.Column(db.Text)
 
     weak_topics_json = db.Column(db.Text)
     preparedness_score = db.Column(db.Float)

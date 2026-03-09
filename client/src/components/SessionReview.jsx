@@ -4,41 +4,21 @@ import { ArrowLeft, CheckCircle, XCircle, HelpCircle } from "lucide-react";
 const SessionReview = ({ session, onBack }) => {
   const questions = session?.questions || [];
   const answers = session?.answers || {};
-  const results = session?.feedback || {}; // backend stores per-question details here
-
-  const optionLetter = (optIdx) => String.fromCharCode(65 + optIdx);
+  const results = session?.feedback || {};
 
   const stripOptionPrefix = (s) => {
     const txt = (s ?? "").toString().trim();
     return txt.replace(/^[A-D]\s*[\)\.\:\-]\s*/i, "").trim();
   };
 
-  // const prettyMcqAnswer = (q, letter) => {
-  //   if (!letter) return null;
-  //   const idx = letter.charCodeAt(0) - 65;
-  //   const text = Array.isArray(q.options) && idx >= 0 ? q.options[idx] : "";
-  //   return `${letter}. ${text || ""}`.trim();
-  // };
-
-    const prettyMcqAnswer = (q, letter) => {
-      if (!letter) return null;
-      const idx = letter.charCodeAt(0) - 65;
-      const text = Array.isArray(q.options) && idx >= 0 ? q.options[idx] : "";
-      return `${letter}. ${stripOptionPrefix(text || "")}`.trim();
-    };
-
-    const prettyMcqFromLetter = (q, letter) => {
-      if (!letter) return null;
-
-      // if backend ever sends "B. ...." keep only the letter
-      const L = letter.toString().trim().charAt(0).toUpperCase();
-      const idx = L.charCodeAt(0) - 65;
-
-      const rawOpt = Array.isArray(q.options) && idx >= 0 ? q.options[idx] : "";
-      const cleanOpt = stripOptionPrefix(rawOpt);
-
-      return `${L}. ${cleanOpt}`.trim();
-    };
+  const prettyMcqFromLetter = (q, letter) => {
+    if (!letter) return null;
+    const L = letter.toString().trim().charAt(0).toUpperCase();
+    const idx = L.charCodeAt(0) - 65;
+    const rawOpt = Array.isArray(q.options) && idx >= 0 ? q.options[idx] : "";
+    const cleanOpt = stripOptionPrefix(rawOpt);
+    return `${L}. ${cleanOpt}`.trim();
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -64,11 +44,14 @@ const SessionReview = ({ session, onBack }) => {
 
         <div className="mt-6 space-y-8">
           {questions.map((q, idx) => {
-            const r = results[q.id];
+            const r = results[q.id] || {};
             const userAns = answers[q.id];
 
             const isMCQ = q.type === "mcq";
+            const isTF = q.type === "true_false";
+            const isFill = q.type === "fill_blank";
             const isDesc = q.type === "descriptive";
+            const isObjective = isMCQ || isTF || isFill;
 
             const isCorrect = r?.isCorrect;
             const score = typeof r?.understandingScore === "number" ? r.understandingScore : null;
@@ -85,13 +68,26 @@ const SessionReview = ({ session, onBack }) => {
                       <h3 className="text-lg font-medium text-gray-800">{q.question}</h3>
 
                       <div className="flex items-center gap-2">
-                        {isMCQ && typeof isCorrect === "boolean" && (
+                        {r?.difficulty && (
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            r.difficulty === "easy"
+                              ? "bg-green-100 text-green-700"
+                              : r.difficulty === "medium"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-red-100 text-red-700"
+                          }`}>
+                            {r.difficulty}
+                          </span>
+                        )}
+
+                        {isObjective && typeof isCorrect === "boolean" && (
                           isCorrect ? (
                             <CheckCircle className="text-green-600" size={22} />
                           ) : (
                             <XCircle className="text-red-600" size={22} />
                           )
                         )}
+
                         {isDesc && score !== null && (
                           <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
                             Score: {score}/10
@@ -100,11 +96,19 @@ const SessionReview = ({ session, onBack }) => {
                       </div>
                     </div>
 
-                    {(r?.topic || q.topic) && (
-                      <span className="inline-block mt-1 px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">
-                        {r?.topic || q.topic}
-                      </span>
-                    )}
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {(r?.topic || q.topic) && (
+                        <span className="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded">
+                          {r?.topic || q.topic}
+                        </span>
+                      )}
+
+                      {(r?.bloomLevel || q?.bloomLevel) && (
+                        <span className="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded">
+                          {r?.bloomLevel || q?.bloomLevel}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -114,18 +118,36 @@ const SessionReview = ({ session, onBack }) => {
                     <div className="text-gray-800 whitespace-pre-wrap">
                       {isMCQ ? (
                         prettyMcqFromLetter(q, userAns) || <span className="text-gray-400">Not answered</span>
-                        ) : (
-                          userAns ?? <span className="text-gray-400">Not answered</span>
-                        )}
+                      ) : (
+                        userAns ?? <span className="text-gray-400">Not answered</span>
+                      )}
                     </div>
                   </div>
 
-                  {isMCQ && (
+                  {isObjective && (
                     <div className="p-3 rounded border">
                       <div className="text-xs text-gray-500 mb-1">Correct Answer</div>
                       <div className="text-gray-800">
-                        {/* {r?.correctAnswer ?? <span className="text-gray-400">—</span>} */}
-                        {r?.correctAnswer ? prettyMcqFromLetter(q, r.correctAnswer) : <span className="text-gray-400">—</span>}
+                        {r?.correctAnswer ? (
+                          isMCQ ? prettyMcqFromLetter(q, r.correctAnswer) : r.correctAnswer
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {r?.maxMarks !== undefined && r?.maxMarks !== null && (
+                    <div className="p-3 rounded border">
+                      <div className="text-xs text-gray-500 mb-1">Marks</div>
+                      <div className="text-gray-800">
+                        <span className="font-medium">{Number(r?.awardedMarks || 0).toFixed(1)}</span>
+                        <span className="text-gray-500"> / {r.maxMarks}</span>
+                        {r?.negativeMarks > 0 && (
+                          <span className="ml-2 text-xs text-red-600">
+                            (-{r.negativeMarks} for wrong)
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
