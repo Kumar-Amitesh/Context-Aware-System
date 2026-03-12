@@ -1100,9 +1100,1172 @@ textarea.input { min-height: 120px; resize: vertical; }
 
 
 
+/* ═══════════════════════════════════════════
+   APPEND THIS BLOCK TO THE BOTTOM OF App.css
+   ─── New Chat Modal: Session Mode Selector ───
+═══════════════════════════════════════════ */
 
+.session-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
+.session-mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: center;
+  color: var(--text-secondary);
+  font-family: var(--font);
+}
 
+.session-mode-card:hover {
+  border-color: var(--border-accent);
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.session-mode-card.active {
+  border-color: var(--primary);
+  background: var(--primary-dim);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.session-mode-icon {
+  font-size: 22px;
+  line-height: 1;
+  color: inherit;
+}
+
+.session-mode-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.session-mode-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.session-mode-card.active .session-mode-desc {
+  color: var(--text-secondary);
+}
+
+.voice-count-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.voice-count-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ═══════════════════════════════════════════
+   Voice Interview Component
+═══════════════════════════════════════════ */
+
+.vi-container {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 32px;
+}
+
+/* ── top progress bar ── */
+.vi-topbar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.vi-progress-wrap {
+  height: 3px;
+  background: var(--surface-3);
+  width: 100%;
+}
+
+.vi-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.5s ease;
+  box-shadow: 0 0 8px rgba(99,102,241,0.5);
+}
+
+.vi-topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+}
+
+.vi-q-counter {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vi-q-counter strong {
+  color: var(--text-primary);
+}
+
+.vi-mute-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ── question card ── */
+.vi-question-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px 24px;
+  position: relative;
+}
+
+.vi-phase-badge {
+  margin-bottom: 16px;
+}
+
+.vi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.vi-badge-reading {
+  background: rgba(99,102,241,0.12);
+  color: var(--primary);
+  border: 1px solid var(--border-accent);
+}
+
+.vi-badge-listening {
+  background: rgba(244,63,94,0.1);
+  color: var(--danger);
+  border: 1px solid rgba(244,63,94,0.3);
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-badge-ready {
+  background: rgba(16,185,129,0.1);
+  color: var(--success);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+
+/* Ready prompt */
+.vi-ready-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 0;
+}
+
+.vi-ready-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(16,185,129,0.1);
+  border: 2px solid rgba(16,185,129,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--success);
+}
+
+.vi-ready-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.vi-ready-label strong {
+  color: var(--text-primary);
+}
+
+.vi-question-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.vi-question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── answer / listening area ── */
+.vi-answer-area {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.vi-countdown-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 70px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.vi-mic-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.vi-mic-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(244,63,94,0.1);
+  border: 2px solid rgba(244,63,94,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-transcript-box {
+  width: 100%;
+  min-height: 80px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+}
+
+.vi-transcript-text {
+  font-size: 15px;
+  color: var(--text-primary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.vi-transcript-placeholder {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── reading indicator ── */
+.vi-reading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.vi-reading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.vi-reading-dots span {
+  width: 8px;
+  height: 8px;
+  background: var(--primary);
+  border-radius: 50%;
+  animation: viBounce 1.2s ease infinite;
+  opacity: 0.6;
+}
+
+.vi-reading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.vi-reading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes viBounce {
+  0%, 80%, 100% { transform: translateY(0);    opacity: 0.5; }
+  40%            { transform: translateY(-8px); opacity: 1;   }
+}
+
+.vi-reading-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── controls ── */
+.vi-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── center states (submitting / loading) ── */
+.vi-center-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  gap: 16px;
+  text-align: center;
+}
+
+.vi-spinner {
+  color: var(--primary);
+}
+
+.vi-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.vi-center-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.vi-center-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── responsive ── */
+@media (max-width: 768px) {
+  .session-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vi-question-card {
+    padding: 20px 18px 18px;
+  }
+
+  .vi-question-text {
+    font-size: 16px;
+  }
+
+  .vi-controls {
+    flex-wrap: wrap;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   APPEND THIS BLOCK TO THE BOTTOM OF App.css
+   ─── New Chat Modal: Session Mode Selector ───
+═══════════════════════════════════════════ */
+
+.session-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.session-mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: center;
+  color: var(--text-secondary);
+  font-family: var(--font);
+}
+
+.session-mode-card:hover {
+  border-color: var(--border-accent);
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.session-mode-card.active {
+  border-color: var(--primary);
+  background: var(--primary-dim);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.session-mode-icon {
+  font-size: 22px;
+  line-height: 1;
+  color: inherit;
+}
+
+.session-mode-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.session-mode-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.session-mode-card.active .session-mode-desc {
+  color: var(--text-secondary);
+}
+
+.voice-count-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.voice-count-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ═══════════════════════════════════════════
+   Voice Interview Component
+═══════════════════════════════════════════ */
+
+.vi-container {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 32px;
+}
+
+/* ── top progress bar ── */
+.vi-topbar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.vi-progress-wrap {
+  height: 3px;
+  background: var(--surface-3);
+  width: 100%;
+}
+
+.vi-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.5s ease;
+  box-shadow: 0 0 8px rgba(99,102,241,0.5);
+}
+
+.vi-topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+}
+
+.vi-q-counter {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vi-q-counter strong {
+  color: var(--text-primary);
+}
+
+.vi-mute-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ── question card ── */
+.vi-question-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px 24px;
+  position: relative;
+}
+
+.vi-phase-badge {
+  margin-bottom: 16px;
+}
+
+.vi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.vi-badge-reading {
+  background: rgba(99,102,241,0.12);
+  color: var(--primary);
+  border: 1px solid var(--border-accent);
+}
+
+.vi-badge-listening {
+  background: rgba(244,63,94,0.1);
+  color: var(--danger);
+  border: 1px solid rgba(244,63,94,0.3);
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-badge-ready {
+  background: rgba(16,185,129,0.1);
+  color: var(--success);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+
+/* Ready prompt */
+.vi-ready-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 0;
+}
+
+.vi-ready-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(16,185,129,0.1);
+  border: 2px solid rgba(16,185,129,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--success);
+}
+
+.vi-ready-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.vi-ready-label strong {
+  color: var(--text-primary);
+}
+
+.vi-question-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.vi-question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── answer / listening area ── */
+.vi-answer-area {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.vi-countdown-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 70px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.vi-mic-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.vi-mic-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(244,63,94,0.1);
+  border: 2px solid rgba(244,63,94,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-transcript-box {
+  width: 100%;
+  min-height: 80px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+}
+
+.vi-transcript-text {
+  font-size: 15px;
+  color: var(--text-primary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.vi-transcript-placeholder {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── reading indicator ── */
+.vi-reading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.vi-reading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.vi-reading-dots span {
+  width: 8px;
+  height: 8px;
+  background: var(--primary);
+  border-radius: 50%;
+  animation: viBounce 1.2s ease infinite;
+  opacity: 0.6;
+}
+
+.vi-reading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.vi-reading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes viBounce {
+  0%, 80%, 100% { transform: translateY(0);    opacity: 0.5; }
+  40%            { transform: translateY(-8px); opacity: 1;   }
+}
+
+.vi-reading-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── controls ── */
+.vi-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── center states (submitting / loading) ── */
+.vi-center-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  gap: 16px;
+  text-align: center;
+}
+
+.vi-spinner {
+  color: var(--primary);
+}
+
+.vi-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.vi-center-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.vi-center-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── New session shortcut button ── */
+.action-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+.new-config-btn {
+  font-size: 13px;
+  color: var(--text-muted);
+  justify-content: center;
+  gap: 7px;
+}
+
+.new-config-btn:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: var(--surface-2);
+}
+
+/* ── responsive ── */
+@media (max-width: 768px) {
+  .session-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vi-question-card {
+    padding: 20px 18px 18px;
+  }
+
+  .vi-question-text {
+    font-size: 16px;
+  }
+
+  .vi-controls {
+    flex-wrap: wrap;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   APPEND THIS BLOCK TO THE BOTTOM OF App.css
+   ─── New Chat Modal: Session Mode Selector ───
+═══════════════════════════════════════════ */
+
+.session-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.session-mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: center;
+  color: var(--text-secondary);
+  font-family: var(--font);
+}
+
+.session-mode-card:hover {
+  border-color: var(--border-accent);
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.session-mode-card.active {
+  border-color: var(--primary);
+  background: var(--primary-dim);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.session-mode-icon {
+  font-size: 22px;
+  line-height: 1;
+  color: inherit;
+}
+
+.session-mode-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.session-mode-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.session-mode-card.active .session-mode-desc {
+  color: var(--text-secondary);
+}
+
+.voice-count-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.voice-count-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ═══════════════════════════════════════════
+   Voice Interview Component
+═══════════════════════════════════════════ */
+
+.vi-container {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 32px;
+}
+
+/* ── top progress bar ── */
+.vi-topbar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.vi-progress-wrap {
+  height: 3px;
+  background: var(--surface-3);
+  width: 100%;
+}
+
+.vi-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.5s ease;
+  box-shadow: 0 0 8px rgba(99,102,241,0.5);
+}
+
+.vi-topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+}
+
+.vi-q-counter {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vi-q-counter strong {
+  color: var(--text-primary);
+}
+
+.vi-mute-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ── question card ── */
+.vi-question-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px 24px;
+  position: relative;
+}
+
+.vi-phase-badge {
+  margin-bottom: 16px;
+}
+
+.vi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.vi-badge-reading {
+  background: rgba(99,102,241,0.12);
+  color: var(--primary);
+  border: 1px solid var(--border-accent);
+}
+
+.vi-badge-listening {
+  background: rgba(244,63,94,0.1);
+  color: var(--danger);
+  border: 1px solid rgba(244,63,94,0.3);
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-badge-ready {
+  background: rgba(16,185,129,0.1);
+  color: var(--success);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+
+/* Ready prompt */
+.vi-ready-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 0;
+}
+
+.vi-ready-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(16,185,129,0.1);
+  border: 2px solid rgba(16,185,129,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--success);
+}
+
+/* Pulsing ring during the 800ms buffer before STT starts */
+.vi-ready-icon--pulse {
+  animation: vi-mic-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes vi-mic-pulse {
+  from { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); transform: scale(1); }
+  to   { box-shadow: 0 0 0 10px rgba(16,185,129,0); transform: scale(1.07); }
+}
+
+.vi-ready-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.vi-ready-label strong {
+  color: var(--text-primary);
+}
+
+.vi-question-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.vi-question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── answer / listening area ── */
+.vi-answer-area {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.vi-countdown-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 70px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.vi-mic-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.vi-mic-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(244,63,94,0.1);
+  border: 2px solid rgba(244,63,94,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 1.5s ease infinite;
+}
+
+.vi-transcript-box {
+  width: 100%;
+  min-height: 80px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+}
+
+.vi-transcript-text {
+  font-size: 15px;
+  color: var(--text-primary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.vi-transcript-placeholder {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── reading indicator ── */
+.vi-reading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.vi-reading-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.vi-reading-dots span {
+  width: 8px;
+  height: 8px;
+  background: var(--primary);
+  border-radius: 50%;
+  animation: viBounce 1.2s ease infinite;
+  opacity: 0.6;
+}
+
+.vi-reading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.vi-reading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes viBounce {
+  0%, 80%, 100% { transform: translateY(0);    opacity: 0.5; }
+  40%            { transform: translateY(-8px); opacity: 1;   }
+}
+
+.vi-reading-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── controls ── */
+.vi-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ── center states (submitting / loading) ── */
+.vi-center-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  gap: 16px;
+  text-align: center;
+}
+
+.vi-spinner {
+  color: var(--primary);
+}
+
+.vi-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.vi-center-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.vi-center-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── New session shortcut button ── */
+.action-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+.new-config-btn {
+  font-size: 13px;
+  color: var(--text-muted);
+  justify-content: center;
+  gap: 7px;
+}
+
+.new-config-btn:hover:not(:disabled) {
+  color: var(--text-secondary);
+  background: var(--surface-2);
+}
+
+/* ── responsive ── */
+@media (max-width: 768px) {
+  .session-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vi-question-card {
+    padding: 20px 18px 18px;
+  }
+
+  .vi-question-text {
+    font-size: 16px;
+  }
+
+  .vi-controls {
+    flex-wrap: wrap;
+  }
+}
 
 
 

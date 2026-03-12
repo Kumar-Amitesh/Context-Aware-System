@@ -1,42 +1,64 @@
 import React, { useState } from 'react';
-import { Send, Upload, AlertCircle, FileText, History, Clock, BarChart3, Zap } from 'lucide-react';
+import { Send, Upload, AlertCircle, FileText, History, Clock, BarChart3, Zap, Mic, Settings } from 'lucide-react';
 import { chatAPI } from '../services/api';
 
 const sessionLabel = (type) => {
   if (!type) return 'Practice';
   if (type === 'full' || type === 'full_fallback') return 'Full Practice Test';
   if (type === 'weak') return 'Weak Topics Practice';
+  if (type === 'voice_full') return 'Voice Interview (Full)';
+  if (type === 'voice_weak') return 'Voice Interview (Weak Topics)';
   return type.replace('_', ' ');
+};
+
+/* Infer session mode from examConfig — no backend field needed */
+const isVoiceMode = (chat) => {
+  if (!chat?.examConfig) return false;
+  try {
+    const config = typeof chat.examConfig === 'string'
+      ? JSON.parse(chat.examConfig)
+      : chat.examConfig;
+    const qt = config.questionTypes || {};
+    const keys = Object.keys(qt).filter((k) => (qt[k]?.count || 0) > 0);
+    return keys.length === 1 && keys[0] === 'descriptive';
+  } catch { return false; }
 };
 
 const PracticeSession = ({
   chat, pdfs, sessionHistory, onGenerateFullExam, onGenerateWeakExam,
+  onGenerateVoiceFull, onGenerateVoiceWeak,
   onUploadPDF, onOpenHistorySession, canGenerate, allProcessed, hasAnyPDF,
+  onNewSessionPrefilled,
 }) => {
-  const [uploading, setUploading] = useState(false);
+  const [uploading,  setUploading]  = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showAllPdfs, setShowAllPdfs] = useState(false);
 
-  const processedCount = (pdfs || []).filter((p) => p.processed).length;
+  const voiceMode = isVoiceMode(chat);
+
+  const processedCount  = (pdfs || []).filter((p) =>  p.processed).length;
   const processingCount = (pdfs || []).filter((p) => !p.processed && !p.error).length;
 
   const getQuestionTypeSummary = () => {
     if (!chat?.examConfig) return null;
     try {
-      const config = typeof chat.examConfig === 'string' ? JSON.parse(chat.examConfig) : chat.examConfig;
+      const config = typeof chat.examConfig === 'string'
+        ? JSON.parse(chat.examConfig)
+        : chat.examConfig;
       const qt = config.questionTypes || {};
       const types = [];
-      if (qt.mcq?.count > 0) types.push(`${qt.mcq.count} MCQ (${qt.mcq.marks}m${qt.mcq.negativeMarks > 0 ? `/-${qt.mcq.negativeMarks}` : ''})`);
-      if (qt.fill_blank?.count > 0) types.push(`${qt.fill_blank.count} Fill (${qt.fill_blank.marks}m)`);
-      if (qt.true_false?.count > 0) types.push(`${qt.true_false.count} T/F (${qt.true_false.marks}m)`);
+      if (qt.mcq?.count         > 0) types.push(`${qt.mcq.count} MCQ (${qt.mcq.marks}m${qt.mcq.negativeMarks > 0 ? `/-${qt.mcq.negativeMarks}` : ''})`);
+      if (qt.fill_blank?.count  > 0) types.push(`${qt.fill_blank.count} Fill (${qt.fill_blank.marks}m)`);
+      if (qt.true_false?.count  > 0) types.push(`${qt.true_false.count} T/F (${qt.true_false.marks}m)`);
       if (qt.descriptive?.count > 0) types.push(`${qt.descriptive.count} Desc (${qt.descriptive.marks}m)`);
       return types;
     } catch { return null; }
   };
 
   const questionTypeSummary = getQuestionTypeSummary();
-  const disabledReason = !hasAnyPDF ? 'Upload at least 1 PDF first'
-    : !allProcessed ? 'Waiting for PDFs to finish processing…' : null;
+  const disabledReason = !hasAnyPDF      ? 'Upload at least 1 PDF first'
+    : !allProcessed                      ? 'Waiting for PDFs to finish processing…'
+    : null;
 
   const handlePDFUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -58,6 +80,17 @@ const PracticeSession = ({
     try { await onGenerateWeakExam(); } finally { setGenerating(false); }
   };
 
+  const handleVoiceFull = async () => {
+    setGenerating(true);
+    try { await onGenerateVoiceFull(); } finally { setGenerating(false); }
+  };
+
+  const handleVoiceWeak = async () => {
+    if (!chat?.weakTopics?.length) { alert('No weak topics identified yet. Complete a session first.'); return; }
+    setGenerating(true);
+    try { await onGenerateVoiceWeak(); } finally { setGenerating(false); }
+  };
+
   return (
     <div className="session-layout">
       {/* Main column */}
@@ -65,14 +98,29 @@ const PracticeSession = ({
         <div className="card">
           {/* Hero */}
           <div className="session-hero">
-            <div className="session-hero-icon"><Send size={24} /></div>
+            <div className="session-hero-icon">
+              {voiceMode ? <Mic size={24} /> : <Send size={24} />}
+            </div>
             <h3>
               {chat?.examType} Preparation
-              {chat?.subject && <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 16 }}> · {chat.subject}</span>}
+              {chat?.subject && (
+                <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 16 }}>
+                  {' · '}{chat.subject}
+                </span>
+              )}
             </h3>
-            <p>
+            {voiceMode && (
+              <div style={{ marginTop: 6 }}>
+                <span className="badge badge-purple" style={{ fontSize: 12 }}>
+                  <Mic size={11} style={{ marginRight: 4 }} /> Voice Interview Mode
+                </span>
+              </div>
+            )}
+            <p style={{ marginTop: 6 }}>
               {processedCount}/{(pdfs || []).length} PDFs processed
-              {processingCount > 0 && <span style={{ color: 'var(--warning)', marginLeft: 8 }}>· Processing…</span>}
+              {processingCount > 0 && (
+                <span style={{ color: 'var(--warning)', marginLeft: 8 }}>· Processing…</span>
+              )}
             </p>
 
             {/* Config chips */}
@@ -109,7 +157,12 @@ const PracticeSession = ({
                 <label className="btn btn-outline btn-sm" style={{ cursor: 'pointer' }}>
                   <Upload size={14} />
                   {uploading ? 'Uploading…' : 'Upload PDF'}
-                  <input type="file" accept=".pdf" multiple onChange={handlePDFUpload} style={{ display: 'none' }} disabled={uploading} />
+                  <input
+                    type="file" accept=".pdf" multiple
+                    onChange={handlePDFUpload}
+                    style={{ display: 'none' }}
+                    disabled={uploading}
+                  />
                 </label>
               </div>
             </div>
@@ -189,19 +242,58 @@ const PracticeSession = ({
             <div className="info-box warning" style={{ marginBottom: 12 }}>{disabledReason}</div>
           )}
 
-          {/* Actions */}
+          {/* ── ACTIONS ── */}
           <div className="action-stack">
-            <button className="btn btn-primary btn-lg btn-full" onClick={handleFullExam} disabled={generating || !canGenerate}>
-              <Send size={18} />
-              {generating ? 'Generating…' : 'Generate Full Practice Test'}
-            </button>
+            {voiceMode ? (
+              /* Voice interview actions */
+              <>
+                <button
+                  className="btn btn-primary btn-lg btn-full"
+                  onClick={handleVoiceFull}
+                  disabled={generating || !canGenerate}
+                >
+                  <Mic size={18} />
+                  {generating ? 'Generating…' : 'Start Full Voice Interview'}
+                </button>
+                <button
+                  className="btn btn-outline btn-full"
+                  onClick={handleVoiceWeak}
+                  disabled={generating || !canGenerate || !chat?.weakTopics?.length}
+                >
+                  <Zap size={16} />
+                  Voice Interview · Weak Topics
+                </button>
+              </>
+            ) : (
+              /* Normal actions */
+              <>
+                <button
+                  className="btn btn-primary btn-lg btn-full"
+                  onClick={handleFullExam}
+                  disabled={generating || !canGenerate}
+                >
+                  <Send size={18} />
+                  {generating ? 'Generating…' : 'Generate Full Practice Test'}
+                </button>
+                <button
+                  className="btn btn-outline btn-full"
+                  onClick={handleWeakExam}
+                  disabled={generating || !canGenerate || !chat?.weakTopics?.length}
+                >
+                  <Zap size={16} />
+                  Focus on Weak Topics
+                </button>
+              </>
+            )}
+
+            {/* Divider + reconfigure shortcut */}
+            <div className="action-divider" />
             <button
-              className="btn btn-outline btn-full"
-              onClick={handleWeakExam}
-              disabled={generating || !canGenerate || !chat?.weakTopics?.length}
+              className="btn btn-ghost btn-full new-config-btn"
+              onClick={() => onNewSessionPrefilled?.(chat?.examType)}
             >
-              <Zap size={16} />
-              Focus on Weak Topics
+              <Settings size={14} />
+              New Session with Different Config
             </button>
           </div>
         </div>
@@ -220,28 +312,38 @@ const PracticeSession = ({
               No sessions yet
             </div>
           ) : (
-            (sessionHistory || []).slice(0, 8).map((session) => (
-              <div key={session.sessionId} className="history-item" onClick={() => onOpenHistorySession?.(session)}>
-                <div className="history-item-row">
-                  <span className="history-label">{sessionLabel(session.type)}</span>
-                  <span className="history-view">View →</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {session.score != null && (
-                    <span className={`badge ${session.score >= 7 ? 'badge-success' : 'badge-warning'}`}>
-                      {Number(session.score).toFixed(1)}/10
+            (sessionHistory || [])
+              .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)) // descending
+              .slice(0, 8)
+              .map((session) => (
+                <div
+                  key={session.sessionId}
+                  className="history-item"
+                  onClick={() => onOpenHistorySession?.(session)}
+                >
+                  <div className="history-item-row">
+                    <span className="history-label">{sessionLabel(session.type)}</span>
+                    <span className="history-view">View →</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {session.score != null && (
+                      <span className={`badge ${session.score >= 7 ? 'badge-success' : 'badge-warning'}`}>
+                        {Number(session.score).toFixed(1)}/10
+                      </span>
+                    )}
+
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                      {session.questions?.length || 0} Qs
                     </span>
-                  )}
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                    {session.questions?.length || 0} Qs
-                  </span>
+                  </div>
+
+                  <div className="history-meta">
+                    <Clock size={11} />
+                    {new Date(session.createdAt).toLocaleDateString()}
+                  </div>
                 </div>
-                <div className="history-meta">
-                  <Clock size={11} />
-                  {new Date(session.createdAt).toLocaleDateString()}
-                </div>
-              </div>
-            ))
+              ))
           )}
         </div>
       </div>
@@ -250,6 +352,279 @@ const PracticeSession = ({
 };
 
 export default PracticeSession;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// import React, { useState } from 'react';
+// import { Send, Upload, AlertCircle, FileText, History, Clock, BarChart3, Zap } from 'lucide-react';
+// import { chatAPI } from '../services/api';
+
+// const sessionLabel = (type) => {
+//   if (!type) return 'Practice';
+//   if (type === 'full' || type === 'full_fallback') return 'Full Practice Test';
+//   if (type === 'weak') return 'Weak Topics Practice';
+//   return type.replace('_', ' ');
+// };
+
+// const PracticeSession = ({
+//   chat, pdfs, sessionHistory, onGenerateFullExam, onGenerateWeakExam,
+//   onUploadPDF, onOpenHistorySession, canGenerate, allProcessed, hasAnyPDF,
+// }) => {
+//   const [uploading, setUploading] = useState(false);
+//   const [generating, setGenerating] = useState(false);
+//   const [showAllPdfs, setShowAllPdfs] = useState(false);
+
+//   const processedCount = (pdfs || []).filter((p) => p.processed).length;
+//   const processingCount = (pdfs || []).filter((p) => !p.processed && !p.error).length;
+
+//   const getQuestionTypeSummary = () => {
+//     if (!chat?.examConfig) return null;
+//     try {
+//       const config = typeof chat.examConfig === 'string' ? JSON.parse(chat.examConfig) : chat.examConfig;
+//       const qt = config.questionTypes || {};
+//       const types = [];
+//       if (qt.mcq?.count > 0) types.push(`${qt.mcq.count} MCQ (${qt.mcq.marks}m${qt.mcq.negativeMarks > 0 ? `/-${qt.mcq.negativeMarks}` : ''})`);
+//       if (qt.fill_blank?.count > 0) types.push(`${qt.fill_blank.count} Fill (${qt.fill_blank.marks}m)`);
+//       if (qt.true_false?.count > 0) types.push(`${qt.true_false.count} T/F (${qt.true_false.marks}m)`);
+//       if (qt.descriptive?.count > 0) types.push(`${qt.descriptive.count} Desc (${qt.descriptive.marks}m)`);
+//       return types;
+//     } catch { return null; }
+//   };
+
+//   const questionTypeSummary = getQuestionTypeSummary();
+//   const disabledReason = !hasAnyPDF ? 'Upload at least 1 PDF first'
+//     : !allProcessed ? 'Waiting for PDFs to finish processing…' : null;
+
+//   const handlePDFUpload = async (e) => {
+//     const files = Array.from(e.target.files || []);
+//     if (!files.length) return;
+//     setUploading(true);
+//     try { await onUploadPDF(files); }
+//     catch (err) { console.error(err); }
+//     finally { setUploading(false); e.target.value = ''; }
+//   };
+
+//   const handleFullExam = async () => {
+//     setGenerating(true);
+//     try { await onGenerateFullExam(); } finally { setGenerating(false); }
+//   };
+
+//   const handleWeakExam = async () => {
+//     if (!chat?.weakTopics?.length) { alert('No weak topics identified yet. Complete a test first.'); return; }
+//     setGenerating(true);
+//     try { await onGenerateWeakExam(); } finally { setGenerating(false); }
+//   };
+
+//   return (
+//     <div className="session-layout">
+//       {/* Main column */}
+//       <div>
+//         <div className="card">
+//           {/* Hero */}
+//           <div className="session-hero">
+//             <div className="session-hero-icon"><Send size={24} /></div>
+//             <h3>
+//               {chat?.examType} Preparation
+//               {chat?.subject && <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 16 }}> · {chat.subject}</span>}
+//             </h3>
+//             <p>
+//               {processedCount}/{(pdfs || []).length} PDFs processed
+//               {processingCount > 0 && <span style={{ color: 'var(--warning)', marginLeft: 8 }}>· Processing…</span>}
+//             </p>
+
+//             {/* Config chips */}
+//             {(questionTypeSummary?.length > 0 || chat?.bloomLevels?.length > 0) && (
+//               <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+//                 {questionTypeSummary?.length > 0 && (
+//                   <div className="config-row" style={{ justifyContent: 'center' }}>
+//                     {questionTypeSummary.map((s, i) => (
+//                       <span key={i} className="badge badge-muted">{s}</span>
+//                     ))}
+//                   </div>
+//                 )}
+//                 {chat?.bloomLevels?.length > 0 && (
+//                   <div className="config-row" style={{ justifyContent: 'center' }}>
+//                     {chat.bloomLevels.map((b, i) => (
+//                       <span key={i} className="badge badge-blue">{b}</span>
+//                     ))}
+//                   </div>
+//                 )}
+//               </div>
+//             )}
+//           </div>
+
+//           {/* PDF section */}
+//           <div style={{ marginBottom: 20 }}>
+//             <div className="pdf-section-header">
+//               <span className="pdf-section-label">Study Materials</span>
+//               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+//                 {(pdfs || []).length > 0 && (
+//                   <button className="btn btn-ghost btn-sm" onClick={() => setShowAllPdfs((s) => !s)}>
+//                     {showAllPdfs ? 'Hide' : 'Show all'}
+//                   </button>
+//                 )}
+//                 <label className="btn btn-outline btn-sm" style={{ cursor: 'pointer' }}>
+//                   <Upload size={14} />
+//                   {uploading ? 'Uploading…' : 'Upload PDF'}
+//                   <input type="file" accept=".pdf" multiple onChange={handlePDFUpload} style={{ display: 'none' }} disabled={uploading} />
+//                 </label>
+//               </div>
+//             </div>
+
+//             {!(pdfs || []).length ? (
+//               <div className="pdf-empty">No PDFs uploaded yet. Upload notes, syllabus, or papers.</div>
+//             ) : showAllPdfs ? (
+//               (pdfs || []).map((pdf) => (
+//                 <div key={pdf.pdfId} className="pdf-item">
+//                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+//                     <FileText size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+//                     <div style={{ minWidth: 0 }}>
+//                       <div className="pdf-name">{pdf.filename}</div>
+//                       <div className="pdf-meta">
+//                         <span className={`badge ${pdf.error ? 'badge-danger' : pdf.processed ? 'badge-success' : 'badge-warning'}`}>
+//                           {pdf.error ? 'Error' : pdf.processed ? 'Ready' : 'Processing'}
+//                         </span>
+//                       </div>
+//                     </div>
+//                   </div>
+//                   {pdf.error && (
+//                     <button className="btn btn-primary btn-sm" onClick={async () => {
+//                       try { await chatAPI.retryPDF(pdf.pdfId); alert('Retry queued'); }
+//                       catch (e) { alert(e.response?.data?.error || e.message); }
+//                     }}>Retry</button>
+//                   )}
+//                 </div>
+//               ))
+//             ) : (
+//               <div className="info-box">
+//                 {(pdfs || []).length} PDF(s) · {processingCount > 0 ? 'Some still processing' : 'All ready'}
+//               </div>
+//             )}
+//           </div>
+
+//           {/* Weak topics */}
+//           {chat?.weakTopics?.length > 0 && (
+//             <div style={{ marginBottom: 20 }}>
+//               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+//                 <AlertCircle size={15} style={{ color: 'var(--warning)' }} />
+//                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Focus Areas</span>
+//               </div>
+//               <div className="config-row">
+//                 {chat.weakTopics.map((topic, idx) => (
+//                   <span key={idx} className="badge badge-warning">{topic}</span>
+//                 ))}
+//               </div>
+//             </div>
+//           )}
+
+//           {/* Analytics */}
+//           {chat?.analytics?.length > 0 && (
+//             <div style={{ marginBottom: 20 }}>
+//               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+//                 <BarChart3 size={15} style={{ color: 'var(--primary)' }} />
+//                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Analytics</span>
+//               </div>
+//               {chat.analytics.slice(0, 3).map((item, idx) => (
+//                 <div key={idx} className="analytics-card">
+//                   <div className="analytics-row">
+//                     <span className="analytics-topic">{item.topic}</span>
+//                     <span className="analytics-score">Weakness: {Math.round((item.score || 0) * 100)}%</span>
+//                   </div>
+//                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>Seen {item.seen || 0}×</div>
+//                   {item.topWeakBlooms?.length > 0 && (
+//                     <div className="config-row">
+//                       {item.topWeakBlooms.map((b, i) => <span key={i} className="badge badge-blue">{b}</span>)}
+//                     </div>
+//                   )}
+//                 </div>
+//               ))}
+//             </div>
+//           )}
+
+//           {/* Disabled reason */}
+//           {disabledReason && (
+//             <div className="info-box warning" style={{ marginBottom: 12 }}>{disabledReason}</div>
+//           )}
+
+//           {/* Actions */}
+//           <div className="action-stack">
+//             <button className="btn btn-primary btn-lg btn-full" onClick={handleFullExam} disabled={generating || !canGenerate}>
+//               <Send size={18} />
+//               {generating ? 'Generating…' : 'Generate Full Practice Test'}
+//             </button>
+//             <button
+//               className="btn btn-outline btn-full"
+//               onClick={handleWeakExam}
+//               disabled={generating || !canGenerate || !chat?.weakTopics?.length}
+//             >
+//               <Zap size={16} />
+//               Focus on Weak Topics
+//             </button>
+//           </div>
+//         </div>
+//       </div>
+
+//       {/* History sidebar */}
+//       <div>
+//         <div className="history-card">
+//           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+//             <History size={16} style={{ color: 'var(--text-muted)' }} />
+//             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>History</span>
+//           </div>
+
+//           {(sessionHistory || []).length === 0 ? (
+//             <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+//               No sessions yet
+//             </div>
+//           ) : (
+//             (sessionHistory || []).slice(0, 8).map((session) => (
+//               <div key={session.sessionId} className="history-item" onClick={() => onOpenHistorySession?.(session)}>
+//                 <div className="history-item-row">
+//                   <span className="history-label">{sessionLabel(session.type)}</span>
+//                   <span className="history-view">View →</span>
+//                 </div>
+//                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+//                   {session.score != null && (
+//                     <span className={`badge ${session.score >= 7 ? 'badge-success' : 'badge-warning'}`}>
+//                       {Number(session.score).toFixed(1)}/10
+//                     </span>
+//                   )}
+//                   <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+//                     {session.questions?.length || 0} Qs
+//                   </span>
+//                 </div>
+//                 <div className="history-meta">
+//                   <Clock size={11} />
+//                   {new Date(session.createdAt).toLocaleDateString()}
+//                 </div>
+//               </div>
+//             ))
+//           )}
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default PracticeSession;
 
 
 
