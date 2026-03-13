@@ -1,0 +1,42 @@
+services:
+  server:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    volumes:
+      - C:/Docker_Data/uploads:/app/uploads
+      - C:/Docker_Data/chroma_data:/app/chroma_db
+    environment:
+      DATABASE_URL: postgresql+psycopg2://examuser:exampass@postgres:5432/examdb
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: ["redis-server", "--bind", "0.0.0.0"]
+
+  celery:
+    build: .
+    command: celery -A app.celery worker --loglevel=info
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - C:/Docker_Data/uploads:/app/uploads
+      - C:/Docker_Data/chroma_data:/app/chroma_db
+    environment:
+      DATABASE_URL: postgresql+psycopg2://examuser:exampass@postgres:5432/examdb
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: examdb
+      POSTGRES_USER: examuser
+      POSTGRES_PASSWORD: exampass
+    volumes:
+      - C:/Docker_Data/postgres_data:/var/lib/postgresql/data
+
+# volumes:
+#   postgres_data:

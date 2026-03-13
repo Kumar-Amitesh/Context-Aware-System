@@ -33,13 +33,13 @@ const ChatSidebar = ({
       <div className="sidebar-body">
         <div className="sidebar-section-label">Sessions</div>
 
-        {chats.length === 0 && (
+        {(chats || []).length === 0 && (
           <div style={{ textAlign: 'center', padding: '24px 8px', color: 'var(--text-muted)', fontSize: 13 }}>
             No sessions yet
           </div>
         )}
 
-        {chats.map((chat) => (
+        {(chats || []).map((chat) => (
           <div key={chat.chatId} className={`chat-item ${currentChatId === chat.chatId ? 'active' : ''}`}>
             <div className="chat-item-btn" onClick={() => onSelectChat(chat.chatId)}>
               <div className="chat-item-row">
@@ -52,13 +52,6 @@ const ChatSidebar = ({
                 )}
               </div>
               <div className="chat-item-date">{new Date(chat.createdAt).toLocaleDateString()}</div>
-              {chat.weakTopics?.length > 0 && (
-                <div className="weak-tags">
-                  {chat.weakTopics.slice(0, 2).map((topic, idx) => (
-                    <span key={idx} className="tag-weak">{topic}</span>
-                  ))}
-                </div>
-              )}
             </div>
 
             {currentChatId === chat.chatId && (
@@ -93,6 +86,115 @@ const ChatSidebar = ({
 };
 
 export default ChatSidebar;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// import React from 'react';
+// import { BookOpen, Plus, LogOut, Upload } from 'lucide-react';
+
+// const ChatSidebar = ({
+//   user, chats, currentChatId, onSelectChat, onCreateChat,
+//   onLogout, onUploadPDF, sidebarOpen,
+// }) => {
+//   const [uploadingPDF, setUploadingPDF] = React.useState(false);
+
+//   const handlePDFUpload = async (chatId, e) => {
+//     const files = Array.from(e.target.files || []);
+//     if (!files.length) return;
+//     setUploadingPDF(true);
+//     try { await onUploadPDF(chatId, files); }
+//     catch (error) { console.error('Error uploading PDF:', error); }
+//     finally { setUploadingPDF(false); e.target.value = ''; }
+//   };
+
+//   return (
+//     <div className={`sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
+//       {/* Header */}
+//       <div className="sidebar-header">
+//         <div className="sidebar-brand">
+//           <div className="brand-icon"><BookOpen size={18} /></div>
+//           <span className="brand-name">Exam Prep AI</span>
+//         </div>
+//         <button className="btn-new-chat" onClick={onCreateChat}>
+//           <Plus size={16} /> New Session
+//         </button>
+//       </div>
+
+//       {/* Chat list */}
+//       <div className="sidebar-body">
+//         <div className="sidebar-section-label">Sessions</div>
+
+//         {chats.length === 0 && (
+//           <div style={{ textAlign: 'center', padding: '24px 8px', color: 'var(--text-muted)', fontSize: 13 }}>
+//             No sessions yet
+//           </div>
+//         )}
+
+//         {chats.map((chat) => (
+//           <div key={chat.chatId} className={`chat-item ${currentChatId === chat.chatId ? 'active' : ''}`}>
+//             <div className="chat-item-btn" onClick={() => onSelectChat(chat.chatId)}>
+//               <div className="chat-item-row">
+//                 <span className="chat-item-title">
+//                   {chat.examType}
+//                   {chat.subject && <span className="chat-item-subject"> · {chat.subject}</span>}
+//                 </span>
+//                 {typeof chat.pdfCount === 'number' && (
+//                   <span className="pdf-chip">{chat.pdfCount} PDFs</span>
+//                 )}
+//               </div>
+//               <div className="chat-item-date">{new Date(chat.createdAt).toLocaleDateString()}</div>
+//               {chat.weakTopics?.length > 0 && (
+//                 <div className="weak-tags">
+//                   {chat.weakTopics.slice(0, 2).map((topic, idx) => (
+//                     <span key={idx} className="tag-weak">{topic}</span>
+//                   ))}
+//                 </div>
+//               )}
+//             </div>
+
+//             {currentChatId === chat.chatId && (
+//               <div className="sidebar-upload">
+//                 <label className="upload-label">
+//                   <Upload size={13} />
+//                   <span>{uploadingPDF ? 'Uploading…' : 'Upload PDF(s)'}</span>
+//                   <input
+//                     type="file" accept=".pdf" multiple
+//                     onChange={(e) => handlePDFUpload(chat.chatId, e)}
+//                     style={{ display: 'none' }} disabled={uploadingPDF}
+//                   />
+//                 </label>
+//               </div>
+//             )}
+//           </div>
+//         ))}
+//       </div>
+
+//       {/* Footer */}
+//       <div className="sidebar-footer">
+//         <div className="user-info">
+//           <div className="user-name">{user.name}</div>
+//           <div className="user-email">{user.email}</div>
+//         </div>
+//         <button className="btn-icon danger" onClick={onLogout} title="Logout">
+//           <LogOut size={17} />
+//         </button>
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default ChatSidebar;
 
 
 

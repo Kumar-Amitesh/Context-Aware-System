@@ -1,0 +1,9 @@
+from .auth_routes import bp as auth_bp
+from .chat_routes import bp as chat_bp
+from .pdf_routes import bp as pdf_bp
+from .question_routes import bp as question_bp
+from .session_routes import bp as session_bp
+from .debug_routes import bp as debug_bp
+from .flashcard_routes import bp as flashcard_bp
+from .video_routes import bp as video_bp
+from .video_session_routes import bp as video_session_bp
