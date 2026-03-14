@@ -177,6 +177,7 @@ const VoiceInterview = ({ questions, sessionId, onFinished, onExit }) => {
 
   /* ── refs ── */
   const wsRef          = useRef(null);
+  const connectedRef = useRef(false);  
   const audioCtxRef    = useRef(null);
   const audioQueueRef  = useRef(null);
   const analyserRef    = useRef(null);
@@ -201,31 +202,62 @@ const VoiceInterview = ({ questions, sessionId, onFinished, onExit }) => {
 
   /* ── start microphone capture ── */
   const startMic = useCallback(async (audioCtx) => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: PCM_SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true }
-    });
-    micStreamRef.current = stream;
+      const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+      });
+      micStreamRef.current = stream;
 
-    const source   = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    source.connect(analyser);
-    analyserRef.current = analyser;
+      const inputCtx = new AudioContext();
+      const source = inputCtx.createMediaStreamSource(stream);
 
-    // ScriptProcessorNode — deprecated but works everywhere; worklet adds complexity
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-    processor.onaudioprocess = (e) => {
-      if (mutedRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      const pcmData = float32ToBase64Pcm(e.inputBuffer.getChannelData(0));
-      wsRef.current.send(JSON.stringify({ type: 'audio_chunk', data: pcmData }));
-    };
-    source.connect(processor);
-    processor.connect(audioCtx.destination);   // must be connected to run
-    processorRef.current = processor;
+      const analyser = inputCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+      processor.onaudioprocess = (e) => {
+          if (mutedRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+          const inputRate = inputCtx.sampleRate;
+
+          // Use OfflineAudioContext to resample properly
+          const targetRate = 16000;
+          if (inputRate === targetRate) {
+              // No resampling needed
+              const pcmData = float32ToBase64Pcm(inputData);
+              wsRef.current.send(JSON.stringify({ type: 'audio_chunk', data: pcmData }));
+              return;
+          }
+
+          // Linear interpolation resampling
+          const ratio = inputRate / targetRate;
+          const outputLength = Math.floor(inputData.length / ratio);
+          const resampled = new Float32Array(outputLength);
+          for (let i = 0; i < outputLength; i++) {
+              const srcIdx = i * ratio;
+              const srcIdxFloor = Math.floor(srcIdx);
+              const srcIdxCeil = Math.min(srcIdxFloor + 1, inputData.length - 1);
+              const frac = srcIdx - srcIdxFloor;
+              // Linear interpolation between adjacent samples
+              resampled[i] = inputData[srcIdxFloor] * (1 - frac) + inputData[srcIdxCeil] * frac;
+          }
+
+          const pcmData = float32ToBase64Pcm(resampled);
+          wsRef.current.send(JSON.stringify({ type: 'audio_chunk', data: pcmData }));
+      };
+
+      source.connect(processor);
+      processor.connect(inputCtx.destination);
+      processorRef.current = processor;
+      audioCtxRef._inputCtx = inputCtx;
   }, []);
 
   /* ── connect WebSocket ── */
   useEffect(() => {
+    if (connectedRef.current) return;  // add this guard
+    connectedRef.current = true;       // add this
     const token = localStorage.getItem('token');
     const url   = `${WS_BASE}/ws/live-interview/${sessionId}?token=${token}`;
     const ws    = new WebSocket(url);
@@ -297,7 +329,8 @@ const VoiceInterview = ({ questions, sessionId, onFinished, onExit }) => {
         case 'interview_done':
           setPhase('done');
           ws.close();
-          setTimeout(() => onFinished?.(), 1500);
+          // setTimeout(() => onFinished?.(), 1500);
+          setTimeout(() => onFinished?.({ score: msg.score }), 1500);
           break;
 
         case 'error':
@@ -315,15 +348,22 @@ const VoiceInterview = ({ questions, sessionId, onFinished, onExit }) => {
       setPhase('error');
     };
 
-    ws.onclose = () => {
-      if (phase !== 'done') setPhase('error');
+    ws.onclose = (event) => {
+      // if (phase !== 'done') setPhase('error');
+      // 1000 = normal closure, 1005 = no status (also normal)
+      if (event.code !== 1000 && event.code !== 1005 && phase !== 'done') {
+          setPhase('error');
+      }
     };
 
     return () => {
-      ws.close();
-      micStreamRef.current?.getTracks().forEach(t => t.stop());
-      processorRef.current?.disconnect();
-      audioCtx.close();
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+        }
+        micStreamRef.current?.getTracks().forEach(t => t.stop());
+        processorRef.current?.disconnect();
+        audioCtxRef._inputCtx?.close().catch(() => {});
+        audioCtx.close().catch(() => {});
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);   // only run once on mount
@@ -338,9 +378,13 @@ const VoiceInterview = ({ questions, sessionId, onFinished, onExit }) => {
   };
 
   const handleExit = () => {
-    wsRef.current?.close();
-    micStreamRef.current?.getTracks().forEach(t => t.stop());
-    onExit?.();
+      wsRef.current?.send(JSON.stringify({ type: 'end_interview' }));
+      // Give server 500ms to process, then close
+      setTimeout(() => {
+          wsRef.current?.close();
+          micStreamRef.current?.getTracks().forEach(t => t.stop());
+          onExit?.();
+      }, 500);
   };
 
   /* ── render ── */

@@ -5,11 +5,12 @@ import websockets
 import os
 
 from flask import Blueprint, request
+from flask import current_app
 from flask_sock import Sock
 
 from extensions import db
 from models import Chat, PracticeSession
-from utils.auth import decode_token
+from utils.auth import verify_token
 
 from services.chroma_service import (
     get_chroma_client,
@@ -32,7 +33,49 @@ GEMINI_LIVE_URL = (
     f"?key={GEMINI_API_KEY}"
 )
 
-LIVE_MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
+LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+
+def merge_conversation_log(conversation_log):
+    """Merge consecutive same-role fragments into single entries."""
+    merged = []
+    for entry in conversation_log:
+        if merged and merged[-1]["role"] == entry["role"]:
+            merged[-1]["text"] += entry["text"]
+        else:
+            merged.append({"role": entry["role"], "text": entry["text"]})
+    return merged
+
+async def save_and_finish(session, chat, questions, conversation_log, browser_ws):
+    try:
+        result = score_interview(questions, merge_conversation_log(conversation_log))
+
+        feedback = result.get("feedback", {})
+
+        # Build answers map from what the LLM extracted per question
+        answers_map = {}
+        for q in questions:
+            qid = q.get("id")
+            fb = feedback.get(qid, {})
+            answers_map[qid] = fb.get("userAnswer", "")
+
+        session.score = result.get("score", 0)
+        session.feedback_json = json.dumps(feedback)
+        session.answers = json.dumps(answers_map)
+        chat.weak_topics_json = json.dumps(result.get("weak_topics", []))
+        db.session.commit()
+
+        try:
+            browser_ws.send(json.dumps({
+                "type": "interview_done",
+                "score": session.score
+            }))
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[save_and_finish] error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # ─────────────────────────────────────────────
@@ -68,34 +111,61 @@ Speak naturally and conversationally.
 
 ## Interview Questions
 
+You have EXACTLY {len(questions)} questions to ask:
+
 {qs_block}
 
-## Interview Behavior
+## Rules
 
-Start with a short welcome and ask Question 1.
+- Ask Question 1 first with a brief welcome.
+- After the candidate answers, ask AT MOST ONE follow-up.
+- Then move to the next question immediately.
+- After all {len(questions)} questions and their follow-ups are done, say EXACTLY this phrase and nothing else:
 
-After each answer:
+"Interview complete. Well done."
 
-• If answer is strong → ask a deeper follow-up  
-• If answer is partial → ask clarification  
-• If answer is wrong → provide a hint
-
-Difficulty rules:
-
-• If candidate answers confidently → increase difficulty
-• If candidate struggles → simplify explanation
-
-Conversation rules:
-
-• Keep responses SHORT
-• Do NOT repeat the full question
-• Ask only one follow-up
-• Allow interruptions
-
-After finishing all questions say exactly:
-
-Interview complete. Well done.
+- Do NOT ask more than {len(questions)} main questions.
+- Do NOT keep the conversation going after all questions are done.
+- Keep all responses SHORT (2-3 sentences max).
 """
+
+#     return f"""
+# You are an expert interviewer conducting a spoken voice interview.
+
+# Speak naturally and conversationally.
+
+# {context_block}
+
+# ## Interview Questions
+
+# {qs_block}
+
+# ## Interview Behavior
+
+# Start with a short welcome and ask Question 1.
+
+# After each answer:
+
+# • If answer is strong → ask a deeper follow-up  
+# • If answer is partial → ask clarification  
+# • If answer is wrong → provide a hint
+
+# Difficulty rules:
+
+# • If candidate answers confidently → increase difficulty
+# • If candidate struggles → simplify explanation
+
+# Conversation rules:
+
+# • Keep responses SHORT
+# • Do NOT repeat the full question
+# • Ask only one follow-up
+# • Allow interruptions
+
+# After finishing all questions say exactly:
+
+# Interview complete. Well done.
+# """
 
 
 # ─────────────────────────────────────────────
@@ -177,172 +247,173 @@ def retrieve_pdf_context(user_id, chat_id, questions):
 # ─────────────────────────────────────────────
 
 async def bridge(browser_ws, session_id):
+    try:
+        session = PracticeSession.query.get(session_id)
 
-    session = PracticeSession.query.get(session_id)
-
-    if not session:
-        browser_ws.send(json.dumps({"error": "Session not found"}))
-        return
-
-    questions = json.loads(session.questions or "[]")
-
-    chat = Chat.query.get(session.chat_id)
-
-    if not chat:
-        browser_ws.send(json.dumps({"error": "Chat not found"}))
-        return
-
-    user_id = chat.user_id
-    chat_id = chat.id
-
-    pdf_chunks = retrieve_pdf_context(user_id, chat_id, questions)
-
-    system_prompt = build_system_prompt(questions, pdf_chunks)
-
-    setup_message = build_setup_message(system_prompt)
-
-    conversation_log = []
-
-    browser_ws.send(json.dumps({"type": "proxy_ready"}))
-
-    async with websockets.connect(
-        GEMINI_LIVE_URL,
-        ping_interval=20,
-        ping_timeout=30,
-        max_size=25 * 1024 * 1024,
-    ) as gemini_ws:
-
-        await gemini_ws.send(json.dumps(setup_message))
-
-        setup_ack = await gemini_ws.recv()
-
-        if "setupComplete" not in json.loads(setup_ack):
-            browser_ws.send(json.dumps({"error": "Gemini setup failed"}))
+        if not session:
+            try:
+                browser_ws.send(json.dumps({"error": "Session not found"}))
+            except Exception:
+                pass
             return
 
-        browser_ws.send(json.dumps({"type": "gemini_ready"}))
+        questions = json.loads(session.questions or "[]")
+        chat = Chat.query.get(session.chat_id)
 
-        loop = asyncio.get_event_loop()
+        # At the top of bridge(), after loading questions:
+        min_turns_required = len(questions) * 2   # each question + at least one answer
 
-        async def browser_to_gemini():
+        turn_count = 0   # increment on every turnComplete
 
-            while True:
+        if not chat:
+            try:
+                browser_ws.send(json.dumps({"error": "Chat not found"}))
+            except Exception:
+                pass
+            return
 
-                raw = await loop.run_in_executor(None, browser_ws.receive)
+        user_id = chat.user_id
+        chat_id = chat.id
 
-                if raw is None:
-                    break
+        pdf_chunks = retrieve_pdf_context(user_id, chat_id, questions)
+        system_prompt = build_system_prompt(questions, pdf_chunks)
+        setup_message = build_setup_message(system_prompt)
+        conversation_log = []
 
-                msg = json.loads(raw)
+        try:
+            browser_ws.send(json.dumps({"type": "proxy_ready"}))
+        except Exception:
+            return  # client already disconnected, abort silently
 
-                if msg.get("type") == "audio_chunk":
+        async with websockets.connect(
+            GEMINI_LIVE_URL,
+            ping_interval=20,
+            ping_timeout=30,
+            max_size=25 * 1024 * 1024,
+        ) as gemini_ws:
 
-                    await gemini_ws.send(json.dumps({
-                        "realtimeInput": {
-                            "audio": {
-                                "data": msg["data"],
-                                "mimeType": "audio/pcm;rate=16000"
+            await gemini_ws.send(json.dumps(setup_message))
+
+            setup_ack = await gemini_ws.recv()
+
+            if "setupComplete" not in json.loads(setup_ack):
+                browser_ws.send(json.dumps({"error": "Gemini setup failed"}))
+                return
+
+            browser_ws.send(json.dumps({"type": "gemini_ready"}))
+
+            loop = asyncio.get_event_loop()
+
+            async def browser_to_gemini():
+                while True:
+                    raw = await loop.run_in_executor(None, browser_ws.receive)
+                    if raw is None:
+                        break
+
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+
+                    if msg.get("type") == "audio_chunk":
+                        await gemini_ws.send(json.dumps({
+                            "realtimeInput": {
+                                "audio": {
+                                    "data": msg["data"],
+                                    "mimeType": "audio/pcm;rate=16000"
+                                }
                             }
-                        }
-                    }))
-
-                elif msg.get("type") == "audio_stream_end":
-
-                    await gemini_ws.send(json.dumps({
-                        "realtimeInput": {"audioStreamEnd": True}
-                    }))
-
-        async def gemini_to_browser():
-
-            async for raw in gemini_ws:
-
-                try:
-
-                    data = json.loads(raw)
-
-                    sc = data.get("serverContent", {})
-
-                    model_turn = sc.get("modelTurn", {})
-
-                    for part in model_turn.get("parts", []):
-
-                        if "inlineData" in part:
-
-                            browser_ws.send(json.dumps({
-                                "type": "audio_chunk",
-                                "data": part["inlineData"]["data"],
-                                "mimeType": part["inlineData"].get(
-                                    "mimeType",
-                                    "audio/pcm;rate=24000"
-                                ),
-                            }))
-
-                    out_t = sc.get("outputTranscription", {})
-
-                    if out_t.get("text"):
-
-                        text = out_t["text"]
-
-                        conversation_log.append({
-                            "role": "interviewer",
-                            "text": text
-                        })
-
-                        browser_ws.send(json.dumps({
-                            "type": "interviewer_transcript",
-                            "text": text,
                         }))
 
-                    in_t = sc.get("inputTranscription", {})
-
-                    if in_t.get("text"):
-
-                        text = in_t["text"]
-
-                        conversation_log.append({
-                            "role": "candidate",
-                            "text": text
-                        })
-
-                        browser_ws.send(json.dumps({
-                            "type": "candidate_transcript",
-                            "text": text,
+                    elif msg.get("type") == "audio_stream_end":
+                        await gemini_ws.send(json.dumps({
+                            "realtimeInput": {"audioStreamEnd": True}
                         }))
 
-                    if sc.get("turnComplete"):
+                    elif msg.get("type") == "end_interview":
+                        # User clicked End — save whatever we have and exit
+                        await save_and_finish(session, chat, questions, conversation_log, browser_ws)
+                        return
 
-                        browser_ws.send(json.dumps({"type": "turn_complete"}))
+            async def gemini_to_browser():
+                candidate_buf = ''      # ← add this
+                
+                async for raw in gemini_ws:
+                    try:
+                        data = json.loads(raw)
+                        sc = data.get("serverContent", {})
+                        model_turn = sc.get("modelTurn", {})
 
-                    for part in model_turn.get("parts", []):
+                        for part in model_turn.get("parts", []):
+                            if "inlineData" in part:
+                                browser_ws.send(json.dumps({
+                                    "type": "audio_chunk",
+                                    "data": part["inlineData"]["data"],
+                                    "mimeType": part["inlineData"].get("mimeType", "audio/pcm;rate=24000"),
+                                }))
 
-                        if "text" in part and "interview complete" in part["text"].lower():
+                        out_t = sc.get("outputTranscription", {})
+                        if out_t.get("text"):
+                            text = out_t["text"]
+                            conversation_log.append({"role": "interviewer", "text": text})
+                            browser_ws.send(json.dumps({"type": "interviewer_transcript", "text": text}))
 
-                            result = score_interview(questions, conversation_log)
-
-                            session.score = result.get("score", 0)
-                            session.feedback_json = json.dumps(result.get("feedback", {}))
-
-                            chat.weak_topics_json = json.dumps(result.get("weak_topics", []))
-                            chat.preparedness_score = result.get("score", 0)
-
-                            db.session.commit()
-
+                        in_t = sc.get("inputTranscription", {})
+                        if in_t.get("text"):
+                            candidate_buf += in_t["text"]           # ← buffer, don't append yet
                             browser_ws.send(json.dumps({
-                                "type": "interview_done",
-                                "score": session.score
+                                "type": "candidate_transcript", 
+                                "text": in_t["text"]
                             }))
 
-                    if sc.get("interrupted"):
+                        if sc.get("turnComplete"):
+                            # Flush candidate buffer on turn complete
+                            # Then in gemini_to_browser, when sc.get("turnComplete"):
+                            turn_count += 1
+                            if candidate_buf.strip():               # ← flush here
+                                conversation_log.append({
+                                    "role": "candidate", 
+                                    "text": candidate_buf.strip()
+                                })
+                                candidate_buf = ''
+                            browser_ws.send(json.dumps({"type": "turn_complete"}))
 
-                        browser_ws.send(json.dumps({"type": "interrupted"}))
+                        if sc.get("interrupted"):
+                            # Flush whatever candidate said before interruption too
+                            if candidate_buf.strip():               # ← flush on interrupt too
+                                conversation_log.append({
+                                    "role": "candidate",
+                                    "text": candidate_buf.strip()
+                                })
+                                candidate_buf = ''
+                            browser_ws.send(json.dumps({"type": "interrupted"}))
 
-                except Exception:
-                    continue
+                        # Check for completion AFTER flushing buffers
+                        if out_t.get("text") and "interview complete" in out_t["text"].lower() and turn_count >= min_turns_required:
+                            if candidate_buf.strip():               # ← final flush before saving
+                                conversation_log.append({
+                                    "role": "candidate",
+                                    "text": candidate_buf.strip()
+                                })
+                                candidate_buf = ''
+                            await save_and_finish(
+                                session, chat, questions, conversation_log, browser_ws
+                            )
+                            return
 
-        await asyncio.gather(
-            browser_to_gemini(),
-            gemini_to_browser()
-        )
+                    except Exception:
+                        continue
+
+            await asyncio.gather(
+                browser_to_gemini(),
+                gemini_to_browser()
+            )
+    except Exception as e:
+        print(f"[bridge] unhandled error: {e}")
+        try:
+            browser_ws.send(json.dumps({"error": str(e)}))
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────
@@ -350,15 +421,22 @@ async def bridge(browser_ws, session_id):
 # ─────────────────────────────────────────────
 
 def run_bridge_thread(ws, session_id):
+    from app import app
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
-        loop.run_until_complete(bridge(ws, session_id))
+        with app.app_context():
+            loop.run_until_complete(bridge(ws, session_id))
+    except Exception as e:
+        print(f"[run_bridge_thread] error: {e}")
+        try:
+            ws.send(json.dumps({"error": str(e)}))
+        except Exception:
+            pass
     finally:
         loop.close()
-
 
 # ─────────────────────────────────────────────
 # WEBSOCKET ROUTE
@@ -366,26 +444,44 @@ def run_bridge_thread(ws, session_id):
 
 @sock.route("/ws/live-interview/<session_id>")
 def live_interview_ws(ws, session_id):
-
     token = request.args.get("token")
-
     if not token:
         ws.send(json.dumps({"error": "Missing token"}))
         return
-
     try:
-        decode_token(token)
+        verify_token(token)
     except Exception:
         ws.send(json.dumps({"error": "Invalid token"}))
         return
 
-    thread = threading.Thread(
-        target=run_bridge_thread,
-        args=(ws, session_id),
-        daemon=True
-    )
+    # Run bridge directly in a new event loop — no join needed
+    # Flask-Sock keeps ws alive as long as this function runs
+    run_bridge_thread(ws, session_id)  # this blocks THIS thread only
 
-    thread.start()
+# @sock.route("/ws/live-interview/<session_id>")
+# def live_interview_ws(ws, session_id):
+
+#     token = request.args.get("token")
+
+#     if not token:
+#         ws.send(json.dumps({"error": "Missing token"}))
+#         return
+
+#     try:
+#         verify_token(token)
+#     except Exception:
+#         ws.send(json.dumps({"error": "Invalid token"}))
+#         return
+
+#     thread = threading.Thread(
+#         target=run_bridge_thread,
+#         args=(ws, session_id),
+#         daemon=True
+#     )
+#     thread.start()
+#     thread.join()
+
+
 
 
 
@@ -443,7 +539,7 @@ def live_interview_ws(ws, session_id):
 #     chroma_collection_name
 # )
 # from services.embedding_service import get_embedding_model
-# from utils.auth import decode_token
+# from utils.auth import verify_token
 
 # live_bp   = Blueprint('live_interview', __name__)
 # sock      = Sock()   # initialised in app.py with sock.init_app(app)
@@ -706,7 +802,7 @@ def live_interview_ws(ws, session_id):
 #         return
 
 #     try:
-#         decode_token(token)   # raises on invalid/expired
+#         verify_token(token)   # raises on invalid/expired
 #     except Exception:
 #         ws.send(json.dumps({"error": "Invalid token"}))
 #         return

@@ -256,18 +256,20 @@ const App = () => {
     }
   };
 
-  const handleVoiceInterviewFinished = (result, answers) => {
-    const sessionQuestions = activeSession?.questions || [];
-    const sessionId        = activeSession?.sessionId;
+  const handleVoiceInterviewFinished = async () => {
+    // const sessionQuestions = activeSession?.questions || [];
+    // const sessionId        = activeSession?.sessionId;
+    // setActiveSession(null);
+    // if (result) {
+    //   setReviewSession({
+    //     sessionId, type: 'voice_full', createdAt: new Date().toISOString(),
+    //     score: result.score, questions: sessionQuestions,
+    //     answers: answers || {}, feedback: result.results || {},
+    //   });
+    //   loadSessionHistory(currentChatId);
+    // }
     setActiveSession(null);
-    if (result) {
-      setReviewSession({
-        sessionId, type: 'voice_full', createdAt: new Date().toISOString(),
-        score: result.score, questions: sessionQuestions,
-        answers: answers || {}, feedback: result.results || {},
-      });
-      loadSessionHistory(currentChatId);
-    }
+    await loadSessionHistory(currentChatId);
   };
 
   const handleVideoInterviewFinished = (result) => {
