@@ -7,3 +7,5 @@ from .debug_routes import bp as debug_bp
 from .flashcard_routes import bp as flashcard_bp
 from .video_routes import bp as video_bp
 from .video_session_routes import bp as video_session_bp
+from .jd_routes import bp as jd_bp
+from .jd_session_routes import bp as jd_session_bp

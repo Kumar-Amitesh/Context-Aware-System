@@ -4,10 +4,13 @@ from flask_cors import CORS
 from config import Config
 from extensions import db, celery
 # from routes import auth_bp, chat_bp, pdf_bp, question_bp, session_bp, debug_bp
-from routes import auth_bp, chat_bp, pdf_bp, question_bp, session_bp, debug_bp, flashcard_bp, video_bp, video_session_bp
+from routes import auth_bp, chat_bp, pdf_bp, question_bp, session_bp, debug_bp, flashcard_bp, video_bp, video_session_bp, jd_bp, jd_session_bp
+from flask_sock import Sock
+from routes.live_interview_routes import live_bp, sock as live_sock
 
 app = Flask(__name__)
 app.config.from_object(Config)
+live_sock.init_app(app) 
 
 CORS(app, origin="*", supports_credentials=True)
 
@@ -28,6 +31,9 @@ app.register_blueprint(debug_bp)
 app.register_blueprint(flashcard_bp)   
 app.register_blueprint(video_bp)
 app.register_blueprint(video_session_bp)
+app.register_blueprint(jd_bp)
+app.register_blueprint(jd_session_bp)
+app.register_blueprint(live_bp)
 
 if __name__ == "__main__":
     app.run(debug=False, port=5000, host="0.0.0.0", use_reloader=False)

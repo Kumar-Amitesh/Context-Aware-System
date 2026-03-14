@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from models import User
 from extensions import db
 from utils import generate_id, hash_password, verify_password, generate_token
+from services.auth_service import get_user_from_token
 
 bp = Blueprint("auth_routes", __name__)
 
@@ -53,4 +54,20 @@ def login():
             'email': user.email,
             'name': user.name
         }
+    })
+
+@bp.route('/api/auth/me', methods=['GET'])
+def get_me():
+    """
+    Fetch the authenticated user from the DB using their JWT token.
+    Frontend should call this on app init instead of trusting localStorage.
+    """
+    user = get_user_from_token()
+    if not user:
+        return jsonify({'error': 'unauthorized'}), 401
+ 
+    return jsonify({
+        'id': user.id,
+        'email': user.email,
+        'name': user.name
     })

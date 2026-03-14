@@ -1,0 +1,256 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   LiveVoiceInterview.css
+   Add this import to LiveVoiceInterview.jsx:
+     import './LiveVoiceInterview.css';
+   The existing App.css variables (--bg, --surface, --primary, etc.) are reused.
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Container */
+.li-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  font-family: var(--font, system-ui, sans-serif);
+  overflow: hidden;
+}
+
+/* Progress bar */
+.li-progress-track {
+  height: 3px;
+  background: var(--surface-2, rgba(255,255,255,0.06));
+  flex-shrink: 0;
+}
+.li-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary, #6366f1), #a78bfa);
+  transition: width 0.6s ease;
+}
+
+/* ── Header ── */
+.li-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+}
+.li-header-left,
+.li-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.li-logo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f87171;
+  box-shadow: 0 0 0 3px rgba(248,113,113,0.25);
+  animation: li-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes li-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(248,113,113,0.25); }
+  50%       { box-shadow: 0 0 0 6px rgba(248,113,113,0.10); }
+}
+
+.li-logo-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #e2e8f0);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.li-q-count {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+}
+
+/* Status badge */
+.li-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--badge-color, #94a3b8);
+  background: color-mix(in srgb, var(--badge-color, #94a3b8) 12%, transparent);
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--badge-color, #94a3b8) 25%, transparent);
+}
+
+/* ── Waveform ── */
+.li-waveform-wrap {
+  padding: 24px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  background: var(--surface, rgba(255,255,255,0.03));
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+}
+.li-waveform {
+  width: 100%;
+  max-width: 600px;
+  height: 80px;
+  border-radius: 8px;
+}
+.li-waveform-label {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Transcript ── */
+.li-transcript-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+}
+.li-transcript-empty {
+  color: var(--text-muted, #94a3b8);
+  font-size: 13px;
+  text-align: center;
+  margin-top: 40px;
+  font-style: italic;
+}
+.li-transcript-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 80%;
+  animation: li-entry-in 0.25s ease;
+}
+@keyframes li-entry-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.li-entry-interviewer { align-self: flex-start; }
+.li-entry-candidate   { align-self: flex-end;   }
+
+.li-entry-role {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.li-entry-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text, #e2e8f0);
+  background: var(--surface-2, rgba(255,255,255,0.06));
+  padding: 10px 14px;
+  border-radius: 12px;
+}
+.li-entry-interviewer .li-entry-text {
+  background: rgba(96,165,250,0.10);
+  border: 1px solid rgba(96,165,250,0.15);
+  border-bottom-left-radius: 4px;
+}
+.li-entry-candidate .li-entry-text {
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.20);
+  border-bottom-right-radius: 4px;
+}
+
+/* ── Error / Done banners ── */
+.li-error-banner,
+.li-done-banner {
+  margin: 8px 20px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.li-error-banner {
+  background: rgba(248,113,113,0.10);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: #f87171;
+}
+.li-done-banner {
+  background: rgba(52,211,153,0.10);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #34d399;
+}
+
+/* ── Controls ── */
+.li-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+}
+
+.li-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.li-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.li-btn-mute {
+  background: var(--surface-2, rgba(255,255,255,0.07));
+  color: var(--text, #e2e8f0);
+  border-color: var(--border, rgba(255,255,255,0.10));
+}
+.li-btn-mute:hover:not(:disabled) { background: rgba(255,255,255,0.11); }
+.li-btn-muted {
+  background: rgba(248,113,113,0.10);
+  color: #f87171;
+  border-color: rgba(248,113,113,0.25);
+}
+
+.li-btn-danger {
+  background: rgba(248,113,113,0.12);
+  color: #f87171;
+  border-color: rgba(248,113,113,0.25);
+}
+.li-btn-danger:hover { background: rgba(248,113,113,0.22); }
+
+.li-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+}
+
+/* ── Animations ── */
+.li-spin {
+  animation: li-spin 1s linear infinite;
+}
+@keyframes li-spin {
+  to { transform: rotate(360deg); }
+}
+
+.li-pulse-icon {
+  animation: li-pulse 1.4s ease-in-out infinite;
+}
+@keyframes li-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
